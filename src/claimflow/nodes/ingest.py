@@ -9,6 +9,18 @@ from claimflow.state import ClaimState, IngestedDoc
 _TEXT_THRESHOLD = 50
 
 
+def _ocr_first_page(doc: fitz.Document) -> str:
+    """Run tesseract OCR on the first page of a scanned PDF via fitz built-in."""
+    if len(doc) == 0:
+        return ""
+    try:
+        page = doc[0]
+        tp = page.get_textpage_ocr(dpi=300, full=False)
+        return page.get_text(textpage=tp)
+    except Exception:
+        return ""
+
+
 def _classify_doc_type(text: str) -> str:
     lower = text.lower()
     for domain in all_domains():
@@ -30,6 +42,10 @@ def ingest_node(state: ClaimState) -> dict:
             doc = fitz.open(str(pdf_path))
             first_page_text = next(iter(doc)).get_text() if len(doc) > 0 else ""
             has_text = len(first_page_text.strip()) >= _TEXT_THRESHOLD
+
+            if not has_text:
+                first_page_text = _ocr_first_page(doc)
+
             doc_type = _classify_doc_type(first_page_text)
             if doc_type != "supporting" and detected_domain is None:
                 detected_domain = doc_type

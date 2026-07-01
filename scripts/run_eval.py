@@ -26,6 +26,17 @@ def _field_accuracy(predicted: dict, truth: dict) -> tuple[int, int]:
     return correct, total
 
 
+def _citation_faithfulness(policy_answers: list[dict]) -> tuple[int, int]:
+    """Fraction of answers that cite at least one source.
+
+    Proxy for faithfulness: an answer with no citations is likely hallucinated.
+    Full faithfulness (answer grounded in cited text) requires a separate LLM judge.
+    """
+    total = len(policy_answers)
+    cited = sum(1 for a in policy_answers if a.get("citations"))
+    return cited, total
+
+
 def _eval_dir(pkg_dir: Path, app) -> dict:
     gt_path = pkg_dir / "ground_truth.json"
     if not gt_path.exists():
@@ -43,11 +54,14 @@ def _eval_dir(pkg_dir: Path, app) -> dict:
     c, t = _field_accuracy(predicted, gt_fields)
     detected = {(f["field"], f["rule"]) for f in (result.get("validation_failures") or [])}
     caught = sum(1 for err in gt_errors if (err["field"], err["rule"]) in detected)
+    cited, n_answers = _citation_faithfulness(result.get("policy_answers") or [])
 
     return {
         "correct": c,
         "total": t,
         "gt_errors": gt_errors,
+        "cited": cited,
+        "n_answers": n_answers,
         "caught": caught,
         "decision": result.get("decision"),
         "error": None,
@@ -64,6 +78,8 @@ def _print_summary(label: str, results: list[dict]) -> None:
     total_t = sum(r["total"] for r in ok)
     all_gt_errors = sum(len(r["gt_errors"]) for r in ok)
     total_caught = sum(r["caught"] for r in ok)
+    total_cited = sum(r.get("cited", 0) for r in ok)
+    total_answers = sum(r.get("n_answers", 0) for r in ok)
     clean = [r for r in ok if not r["gt_errors"]]
     false_pos = sum(1 for r in clean if r["decision"] == "flagged")
     straight = sum(1 for r in ok if r["decision"] == "approved")
@@ -78,6 +94,8 @@ def _print_summary(label: str, results: list[dict]) -> None:
     if clean:
         print(f"  False positive rate:   {false_pos/len(clean):.1%} ({false_pos}/{len(clean)} clean flagged)")
     print(f"  Straight-through:      {straight/len(ok):.1%} ({straight}/{len(ok)} approved)")
+    if total_answers:
+        print(f"  Citation rate:         {total_cited/total_answers:.1%} ({total_cited}/{total_answers} answers cited)")
     if errors:
         print(f"  Errors:                {errors}")
 

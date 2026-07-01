@@ -5,6 +5,7 @@ from pathlib import Path
 from fastapi import FastAPI, UploadFile
 
 from claimflow.graph import build_graph
+from claimflow.tracing import get_callback
 
 app = FastAPI(title="ClaimFlow", version="0.1.0")
 _graph = None
@@ -32,10 +33,14 @@ async def process_claims(files: list[UploadFile]):
             with open(dest, "wb") as out:
                 shutil.copyfileobj(f.file, out)
 
-        result = _get_graph().invoke({"package_dir": str(pkg_dir)})
+        result = _get_graph().invoke(
+            {"package_dir": str(pkg_dir), "domain": None},
+            config={"callbacks": get_callback()},
+        )
 
     return {
         "decision": result.get("decision"),
+        "domain": result.get("domain"),
         "extraction_overall_confidence": result.get("extraction_overall_confidence"),
         "validation_failures": result.get("validation_failures", []),
         "policy_answers": result.get("policy_answers", []),

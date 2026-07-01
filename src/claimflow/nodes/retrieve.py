@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import anthropic
+import os
 
 from claimflow.config import settings
 from claimflow.state import ClaimState, PolicyAnswer
 
-_client: anthropic.Anthropic | None = None
 _qdrant = None
 _reranker = None
+_llm_client = None
 
 
 def _get_qdrant():
@@ -26,22 +26,47 @@ def _get_reranker():
     return _reranker
 
 
-def _get_client() -> anthropic.Anthropic:
-    global _client
-    if _client is None:
-        _client = anthropic.Anthropic(api_key=settings.anthropic_api_key.get_secret_value())
-    return _client
+def _get_llm_client():
+    global _llm_client
+    if _llm_client is None:
+        if settings.doc_intel_provider == "anthropic":
+            import anthropic
+            _llm_client = ("anthropic", anthropic.Anthropic(
+                api_key=settings.anthropic_api_key.get_secret_value()
+            ))
+        else:
+            from openai import OpenAI
+            _llm_client = ("openai", OpenAI(
+                api_key=os.environ.get("OPENAI_API_KEY", "local"),
+                base_url=settings.doc_intel_llm_base_url or "https://api.openai.com/v1",
+            ))
+    return _llm_client
 
 
-def _failure_to_question(failure: dict) -> str:
+def _failure_to_question(failure: dict, domain_key: str | None) -> str:
     rule = failure["rule"]
     reason = failure["reason"]
-    if rule == "icd10_lookup":
-        return f"Is the following diagnosis code billable under standard health insurance policy? {reason}"
-    if rule == "cpt_lookup":
-        return f"Is the following procedure code covered? {reason}"
-    if rule == "arithmetic":
-        return f"What is the policy on charge discrepancies? {reason}"
+    if domain_key == "cms1500":
+        if rule == "icd10_lookup":
+            return f"Is the following diagnosis code billable under standard health insurance policy? {reason}"
+        if rule == "cpt_lookup":
+            return f"Is the following procedure code covered? {reason}"
+        if rule == "arithmetic":
+            return f"What is the policy on charge discrepancies? {reason}"
+    if domain_key == "xactimate":
+        if rule == "arithmetic":
+            return f"What is the policy on line-item total discrepancies in property estimates? {reason}"
+        if rule == "acv_check":
+            return f"What is the policy when actual cash value does not equal RCV minus depreciation? {reason}"
+        if rule == "negative_amount":
+            return f"What is the policy when a claim amount is negative? {reason}"
+    if domain_key == "loan":
+        if rule == "income_consistency":
+            return f"What is the policy when net income exceeds gross revenue on a loan application? {reason}"
+        if rule == "positive_amount":
+            return f"What is the minimum loan amount required? {reason}"
+        if rule == "signature_required":
+            return f"What happens when a loan application is missing a signature? {reason}"
     return f"What does policy say about: {reason}"
 
 
@@ -60,11 +85,7 @@ def _search(question: str) -> list[dict]:
 
 def _synthesize(question: str, chunks: list[dict]) -> PolicyAnswer:
     if not chunks:
-        return PolicyAnswer(
-            question=question,
-            answer="No relevant policy document found.",
-            citations=[],
-        )
+        return PolicyAnswer(question=question, answer="No relevant policy document found.", citations=[])
 
     reranker = _get_reranker()
     pairs = [(question, c["text"]) for c in chunks]
@@ -78,17 +99,25 @@ def _synthesize(question: str, chunks: list[dict]) -> PolicyAnswer:
         f"Cite sources as [1], [2], [3].\n\n"
         f"Question: {question}\n\nPolicy excerpts:\n{context}"
     )
+    citations = [f"policy excerpt [{i+1}]" for i in range(len(top))]
 
-    response = _get_client().messages.create(
-        model=settings.llm_model,
-        max_tokens=512,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return PolicyAnswer(
-        question=question,
-        answer=response.content[0].text,
-        citations=[f"policy excerpt [{i+1}]" for i in range(len(top))],
-    )
+    provider, client = _get_llm_client()
+    if provider == "anthropic":
+        response = client.messages.create(
+            model=settings.llm_model,
+            max_tokens=512,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        answer = response.content[0].text
+    else:
+        response = client.chat.completions.create(
+            model=settings.doc_intel_model,
+            max_tokens=512,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        answer = response.choices[0].message.content or ""
+
+    return PolicyAnswer(question=question, answer=answer, citations=citations)
 
 
 def retrieve_node(state: ClaimState) -> dict:
@@ -96,13 +125,14 @@ def retrieve_node(state: ClaimState) -> dict:
     if not failures:
         return {"policy_answers": []}
 
+    domain_key = state.get("domain")
     answers: list[PolicyAnswer] = []
-    seen_questions: set[str] = set()
+    seen: set[str] = set()
     for failure in failures:
-        question = _failure_to_question(failure)
-        if question in seen_questions:
+        question = _failure_to_question(failure, domain_key)
+        if question in seen:
             continue
-        seen_questions.add(question)
+        seen.add(question)
         chunks = _search(question)
         answers.append(_synthesize(question, chunks))
 

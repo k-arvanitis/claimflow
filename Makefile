@@ -1,4 +1,4 @@
-.PHONY: install dev test lint api
+.PHONY: install dev test lint api ui
 
 install:
 	uv sync
@@ -14,3 +14,6 @@ lint:
 
 api:
 	uv run uvicorn api.main:app --reload --port 8010
+
+ui:
+	uv run streamlit run streamlit_app.py --server.port 8011
