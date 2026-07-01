@@ -27,4 +27,4 @@ def _load() -> set[str]:
 
 def is_valid_icd10(code: str) -> bool:
     normalized = code.strip().upper()
-    return normalized in _load() or normalized.replace(".", "") in _load()
+    return normalized in _load()

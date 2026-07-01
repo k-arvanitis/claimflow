@@ -35,7 +35,9 @@ def _download_icd10() -> None:
             if line.strip():
                 code, _, desc = line.partition(" ")
                 w.writerow([code.strip(), desc.strip()])
-    print(f"  → {out} ({sum(1 for _ in open(out))-1} codes)")
+    with open(out) as f:
+        count = sum(1 for _ in f) - 1
+    print(f"  → {out} ({count} codes)")
 
 
 def _download_cpt() -> None:
