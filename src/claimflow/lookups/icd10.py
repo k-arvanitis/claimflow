@@ -21,7 +21,10 @@ def _load() -> set[str]:
         for line in f:
             code = line.split(",")[0].strip().upper()
             _codes.add(code)
-            _codes.add(code.replace(".", ""))  # accept both J06.9 and J069
+            stripped = code.replace(".", "")
+            _codes.add(stripped)  # no-dot form (e.g. J069)
+            if len(stripped) > 3:
+                _codes.add(stripped[:3] + "." + stripped[3:])  # dotted form (e.g. J06.9)
     return _codes
 
 

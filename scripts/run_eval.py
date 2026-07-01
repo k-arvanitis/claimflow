@@ -5,6 +5,7 @@ Requires: ANTHROPIC_API_KEY set, data/lookups/ populated (download_lookups.py)
 """
 import argparse
 import json
+import time
 from pathlib import Path
 
 from claimflow.graph import build_graph
@@ -51,6 +52,7 @@ def main() -> None:
 
         try:
             result = app.invoke({"package_dir": str(pkg)})
+            time.sleep(2)  # respect Groq free-tier RPM limits
         except Exception as e:
             print(f"  ERROR {pkg.name}: {e}")
             errors += 1
