@@ -1,9 +1,18 @@
 import os
 
-os.environ.setdefault("DOC_INTEL_PROVIDER", "anthropic")
-os.environ.setdefault("DOC_INTEL_MODEL", "claude-sonnet-4-6")
+# Propagate claimflow settings to doc-intel before its config.py is imported.
+# doc-intel reads these env vars at import time; setdefault would be overridden
+# by doc-intel's own load_dotenv() only for keys not yet in os.environ, so we
+# use explicit assignment so claimflow's pydantic-settings (which reads .env)
+# always wins.
+from claimflow.config import settings  # noqa: E402 (must precede doc-intel import)
 
-from doc_intel.extract import extract
+os.environ["DOC_INTEL_PROVIDER"] = settings.doc_intel_provider
+os.environ["DOC_INTEL_MODEL"] = settings.doc_intel_model
+if settings.doc_intel_llm_base_url:
+    os.environ["DOC_INTEL_LLM_BASE_URL"] = settings.doc_intel_llm_base_url
+
+from doc_intel.extract import extract  # noqa: E402
 
 from claimflow.schemas.cms1500 import CMS1500_SPEC
 from claimflow.state import ClaimState

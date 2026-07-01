@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     # doc-intel passthrough
     doc_intel_provider: str = "anthropic"
     doc_intel_model: str = "claude-sonnet-4-6"
+    doc_intel_llm_base_url: str = ""  # empty = doc-intel default (official API)
 
     # Qdrant
     qdrant_url: str = "http://localhost:6333"
