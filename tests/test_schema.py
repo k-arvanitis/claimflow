@@ -1,5 +1,6 @@
 from decimal import Decimal
-from claimflow.schemas.cms1500 import CMS1500, ServiceLine, CMS1500_SPEC
+
+from claimflow.schemas.cms1500 import CMS1500, CMS1500_SPEC, ServiceLine
 
 
 def test_settings_import():
