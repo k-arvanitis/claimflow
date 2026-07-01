@@ -26,6 +26,7 @@ def test_clean_claim_no_failures(clean_claim):
         from claimflow.state import ClaimState
         state: ClaimState = {
             "package_dir": "/tmp",
+            "domain": "cms1500",
             "documents": [],
             "extraction_data": clean_claim,
             "extraction_fields": [],
@@ -48,7 +49,7 @@ def test_missing_npi_flagged(clean_claim):
         from claimflow.nodes.validate import validate_node
         from claimflow.state import ClaimState
         state: ClaimState = {
-            "package_dir": "/tmp", "documents": [],
+            "package_dir": "/tmp", "domain": "cms1500", "documents": [],
             "extraction_data": clean_claim, "extraction_fields": [],
             "extraction_status": "pass", "extraction_overall_confidence": 0.9,
             "validation_failures": [], "policy_answers": [],
@@ -66,7 +67,7 @@ def test_arithmetic_mismatch_flagged(clean_claim):
         from claimflow.nodes.validate import validate_node
         from claimflow.state import ClaimState
         state: ClaimState = {
-            "package_dir": "/tmp", "documents": [],
+            "package_dir": "/tmp", "domain": "cms1500", "documents": [],
             "extraction_data": clean_claim, "extraction_fields": [],
             "extraction_status": "pass", "extraction_overall_confidence": 0.9,
             "validation_failures": [], "policy_answers": [],
@@ -84,7 +85,7 @@ def test_invalid_icd10_flagged(clean_claim):
         from claimflow.nodes.validate import validate_node
         from claimflow.state import ClaimState
         state: ClaimState = {
-            "package_dir": "/tmp", "documents": [],
+            "package_dir": "/tmp", "domain": "cms1500", "documents": [],
             "extraction_data": clean_claim, "extraction_fields": [],
             "extraction_status": "pass", "extraction_overall_confidence": 0.9,
             "validation_failures": [], "policy_answers": [],

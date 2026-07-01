@@ -1,21 +1,23 @@
-"""Evaluate ClaimFlow against synthetic ground truth packages.
+"""Evaluate ClaimFlow across all domains against synthetic ground truth.
 
-Run: uv run python scripts/run_eval.py --packages data/synthetic/
-Requires: ANTHROPIC_API_KEY set, data/lookups/ populated (download_lookups.py)
+Run: uv run python scripts/run_eval.py
+     uv run python scripts/run_eval.py --domain health
+     uv run python scripts/run_eval.py --packages data/synthetic/property
 """
 import argparse
 import json
-import time
 from pathlib import Path
 
 from claimflow.graph import build_graph
 
+# Fields to skip in scalar comparison (complex/nested or eval-irrelevant)
+_SKIP_FIELDS = {"service_lines", "line_items", "diagnosis_codes", "errors"}
+
 
 def _field_accuracy(predicted: dict, truth: dict) -> tuple[int, int]:
-    """Returns (correct, total) for scalar fields."""
     correct = total = 0
     for key, gt_val in truth.items():
-        if key in ("service_lines", "diagnosis_codes", "errors"):
+        if key in _SKIP_FIELDS:
             continue
         pred_val = predicted.get(key)
         total += 1
@@ -24,73 +26,94 @@ def _field_accuracy(predicted: dict, truth: dict) -> tuple[int, int]:
     return correct, total
 
 
+def _eval_dir(pkg_dir: Path, app) -> dict:
+    gt_path = pkg_dir / "ground_truth.json"
+    if not gt_path.exists():
+        return {}
+    gt = json.loads(gt_path.read_text())
+    gt_fields = gt["fields"]
+    gt_errors = gt["errors"]
+
+    try:
+        result = app.invoke({"package_dir": str(pkg_dir), "domain": None})
+    except Exception as e:
+        return {"error": str(e)}
+
+    predicted = result.get("extraction_data") or {}
+    c, t = _field_accuracy(predicted, gt_fields)
+    detected = {(f["field"], f["rule"]) for f in (result.get("validation_failures") or [])}
+    caught = sum(1 for err in gt_errors if (err["field"], err["rule"]) in detected)
+
+    return {
+        "correct": c,
+        "total": t,
+        "gt_errors": gt_errors,
+        "caught": caught,
+        "decision": result.get("decision"),
+        "error": None,
+    }
+
+
+def _print_summary(label: str, results: list[dict]) -> None:
+    ok = [r for r in results if not r.get("error") and r.get("total", 0) > 0]
+    if not ok:
+        print(f"\n{label}: no results")
+        return
+
+    total_c = sum(r["correct"] for r in ok)
+    total_t = sum(r["total"] for r in ok)
+    all_gt_errors = sum(len(r["gt_errors"]) for r in ok)
+    total_caught = sum(r["caught"] for r in ok)
+    clean = [r for r in ok if not r["gt_errors"]]
+    false_pos = sum(1 for r in clean if r["decision"] == "flagged")
+    straight = sum(1 for r in ok if r["decision"] == "approved")
+    errors = sum(1 for r in results if r.get("error"))
+
+    print(f"\n{'='*52}")
+    print(f"  {label} — {len(ok)} packages")
+    print(f"{'='*52}")
+    print(f"  Field accuracy:        {total_c/total_t:.1%} ({total_c}/{total_t})")
+    if all_gt_errors:
+        print(f"  Validation catch rate: {total_caught/all_gt_errors:.1%} ({total_caught}/{all_gt_errors})")
+    if clean:
+        print(f"  False positive rate:   {false_pos/len(clean):.1%} ({false_pos}/{len(clean)} clean flagged)")
+    print(f"  Straight-through:      {straight/len(ok):.1%} ({straight}/{len(ok)} approved)")
+    if errors:
+        print(f"  Errors:                {errors}")
+
+
+DOMAIN_DIRS = {
+    "health": "data/synthetic",       # legacy flat layout
+    "property": "data/synthetic/property",
+    "loan": "data/synthetic/loan",
+}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--packages", type=Path, default=Path("data/synthetic"))
+    parser.add_argument("--domain", choices=list(DOMAIN_DIRS), default=None,
+                        help="Run a single domain; omit to run all")
+    parser.add_argument("--packages", type=Path, default=None,
+                        help="Override package directory (implies single run)")
     args = parser.parse_args()
-
-    pkgs = sorted(args.packages.glob("package_*"))
-    if not pkgs:
-        print(f"No packages found in {args.packages}. Run generate_cms1500.py first.")
-        return
 
     app = build_graph()
 
-    total_correct = total_fields = 0
-    validation_caught = validation_total = 0
-    false_positives = 0
-    straight_through = 0
-    errors = 0
+    if args.packages:
+        pkgs = sorted(args.packages.glob("package_*"))
+        results = [_eval_dir(p, app) for p in pkgs if (p / "ground_truth.json").exists()]
+        _print_summary(str(args.packages), results)
+        return
 
-    for pkg in pkgs:
-        gt_path = pkg / "ground_truth.json"
-        if not gt_path.exists():
+    domains = [args.domain] if args.domain else list(DOMAIN_DIRS)
+    for domain in domains:
+        pkg_root = Path(DOMAIN_DIRS[domain])
+        pkgs = sorted(pkg_root.glob("package_*"))
+        if not pkgs:
+            print(f"\n{domain}: no packages in {pkg_root} (run generate script first)")
             continue
-        gt = json.loads(gt_path.read_text())
-        gt_fields = gt["fields"]
-        gt_errors = gt["errors"]  # list of {field, rule}
-
-        try:
-            result = app.invoke({"package_dir": str(pkg)})
-            time.sleep(2)  # respect Groq free-tier RPM limits
-        except Exception as e:
-            print(f"  ERROR {pkg.name}: {e}")
-            errors += 1
-            continue
-
-        # Field accuracy
-        predicted = result.get("extraction_data") or {}
-        c, t = _field_accuracy(predicted, gt_fields)
-        total_correct += c
-        total_fields += t
-
-        # Validation catch rate
-        detected_rules = {(f["field"], f["rule"]) for f in (result.get("validation_failures") or [])}
-        for err in gt_errors:
-            validation_total += 1
-            if (err["field"], err["rule"]) in detected_rules:
-                validation_caught += 1
-
-        # False positive: flagged a clean claim
-        if not gt_errors and result.get("decision") == "flagged":
-            false_positives += 1
-
-        if result.get("decision") == "approved":
-            straight_through += 1
-
-    n = len(pkgs) - errors
-    print(f"\n{'='*50}")
-    print(f"ClaimFlow Eval — {n} packages")
-    print(f"{'='*50}")
-    print(f"Field extraction accuracy:  {total_correct/total_fields:.1%} ({total_correct}/{total_fields})")
-    if validation_total:
-        print(f"Validation catch rate:      {validation_caught/validation_total:.1%} ({validation_caught}/{validation_total})")
-    clean = sum(1 for p in pkgs if not json.loads((p/'ground_truth.json').read_text())['errors'])
-    print(f"False positive flag rate:   {false_positives/clean:.1%} ({false_positives}/{clean} clean claims flagged)")
-    print(f"Straight-through rate:      {straight_through/n:.1%} ({straight_through}/{n} approved)")
-    if errors:
-        print(f"Errors:                     {errors}")
-    print(f"{'='*50}")
+        results = [_eval_dir(p, app) for p in pkgs if (p / "ground_truth.json").exists()]
+        _print_summary(domain.upper(), results)
 
 
 if __name__ == "__main__":

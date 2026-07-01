@@ -22,6 +22,7 @@ class PolicyAnswer(TypedDict):
 class ClaimState(TypedDict):
     # Input
     package_dir: str        # path to folder containing PDFs
+    domain: str | None      # detected doc_type, e.g. "cms1500" | "xactimate" | "loan"
 
     # Ingest output
     documents: list[IngestedDoc]
