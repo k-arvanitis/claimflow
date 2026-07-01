@@ -1,0 +1,31 @@
+from pydantic import SecretStr
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    # LLM (extraction + retrieval synthesis)
+    anthropic_api_key: SecretStr = SecretStr("")
+    llm_model: str = "claude-sonnet-4-6"
+
+    # doc-intel passthrough
+    doc_intel_provider: str = "anthropic"
+    doc_intel_model: str = "claude-sonnet-4-6"
+
+    # Qdrant
+    qdrant_url: str = "http://localhost:6333"
+    qdrant_collection: str = "claimflow_policies"
+
+    # Thresholds
+    confidence_threshold: float = 0.75
+    escalation_threshold: float = 0.50  # below this → escalate, not just flag
+
+    # Langfuse (optional)
+    langfuse_enabled: bool = False
+    langfuse_public_key: str = ""
+    langfuse_secret_key: str = ""
+    langfuse_host: str = "https://cloud.langfuse.com"
+
+
+settings = Settings()
