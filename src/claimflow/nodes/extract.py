@@ -1,3 +1,5 @@
+import os
+
 from doc_intel.extract import extract
 
 from claimflow.schemas.cms1500 import CMS1500_SPEC
@@ -11,6 +13,9 @@ def extract_node(state: ClaimState) -> dict:
     )
     if claim_doc is None:
         return {"error": "No CMS-1500 form found in package", "extraction_status": "error"}
+
+    os.environ.setdefault("DOC_INTEL_PROVIDER", "anthropic")
+    os.environ.setdefault("DOC_INTEL_MODEL", "claude-sonnet-4-6")
 
     try:
         result = extract(claim_doc["path"], CMS1500_SPEC)
