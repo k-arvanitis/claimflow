@@ -177,3 +177,20 @@ def test_graph_runs_end_to_end(tmp_path):
 
     assert result["decision"] in ("approved", "flagged", "escalated")
     assert result["documents"]
+
+
+def test_retrieve_node_skipped_when_no_failures():
+    """Retrieve node returns empty answers when there are no failures to look up."""
+    from claimflow.nodes.retrieve import retrieve_node
+    from claimflow.state import ClaimState
+
+    state: ClaimState = {
+        "package_dir": "/tmp", "documents": [],
+        "extraction_data": {}, "extraction_fields": [],
+        "extraction_status": "pass", "extraction_overall_confidence": 0.9,
+        "validation_failures": [],
+        "policy_answers": [],
+        "decision": None, "review_reasons": [], "error": None,
+    }
+    result = retrieve_node(state)
+    assert result["policy_answers"] == []
