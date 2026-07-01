@@ -1,5 +1,3 @@
-from decimal import Decimal
-
 from doc_intel.schemas.base import BaseExtraction, SchemaSpec
 from pydantic import Field
 
@@ -9,7 +7,7 @@ class ServiceLine(BaseExtraction):
     date_of_service: str = Field(description="Date of service MMDDYYYY")
     place_of_service: str = Field(description="2-digit place of service code")
     diagnosis_pointer: str = Field(description="Diagnosis code pointer(s): A, B, C, D")
-    charges: Decimal = Field(description="Dollar amount charged for this line")
+    charges: float = Field(description="Dollar amount charged for this line")
     units: int = Field(description="Number of units/days")
     modifier: str | None = Field(default=None, description="CPT modifier code")
     rendering_provider_npi: str | None = Field(default=None, description="Rendering provider NPI if different from billing")  # noqa: E501
@@ -48,8 +46,8 @@ class CMS1500(BaseExtraction):
     federal_tax_id: str = Field(description="Federal tax ID (Box 25)")
     patient_account_number: str | None = Field(default=None, description="Patient account number (Box 26)")
     accept_assignment: bool = Field(description="Accept assignment YES/NO (Box 27)")
-    total_charge: Decimal = Field(description="Total charge (Box 28)")
-    amount_paid: Decimal = Field(description="Amount paid (Box 29)")
+    total_charge: float = Field(description="Total charge (Box 28)")
+    amount_paid: float = Field(description="Amount paid (Box 29)")
     billing_provider_name: str = Field(description="Billing provider name (Box 33)")
     billing_provider_npi: str = Field(description="Billing provider NPI (Box 33a)")
     billing_provider_address: str = Field(description="Billing provider address (Box 33)")
