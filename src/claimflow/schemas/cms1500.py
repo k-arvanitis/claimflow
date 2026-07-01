@@ -12,7 +12,7 @@ class ServiceLine(BaseExtraction):
     charges: Decimal = Field(description="Dollar amount charged for this line")
     units: int = Field(description="Number of units/days")
     modifier: str | None = Field(default=None, description="CPT modifier code")
-    rendering_provider_npi: str | None = Field(default=None, description="Rendering provider NPI if different from billing")
+    rendering_provider_npi: str | None = Field(default=None, description="Rendering provider NPI if different from billing")  # noqa: E501
 
 
 class CMS1500(BaseExtraction):

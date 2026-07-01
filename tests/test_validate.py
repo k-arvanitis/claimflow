@@ -1,4 +1,3 @@
-from decimal import Decimal
 from unittest.mock import patch
 
 import pytest
@@ -13,7 +12,7 @@ def clean_claim():
         "billing_provider_npi": "1234567890",
         "diagnosis_codes": ["J06.9"],
         "service_lines": [
-            {"cpt_code": "99213", "date_of_service": "01012026", "charges": "150.00", "units": 1, "place_of_service": "11", "diagnosis_pointer": "A"},
+            {"cpt_code": "99213", "date_of_service": "01012026", "charges": "150.00", "units": 1, "place_of_service": "11", "diagnosis_pointer": "A"},  # noqa: E501
         ],
         "total_charge": "150.00",
         "signature_on_file": True,

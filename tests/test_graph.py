@@ -49,6 +49,7 @@ def test_ingest_node_classifies_cms1500(tmp_path):
 def test_extract_node_calls_doc_intel(tmp_path):
     """Extract node calls doc-intel extract() with CMS-1500 spec and stores result."""
     from unittest.mock import MagicMock, patch
+
     from claimflow.state import ClaimState
 
     fake_result = MagicMock()
@@ -87,7 +88,6 @@ def test_extract_node_calls_doc_intel(tmp_path):
 def test_review_node_approves_clean_claim():
     from claimflow.nodes.review import review_node
     from claimflow.state import ClaimState
-    from claimflow.config import settings
 
     state: ClaimState = {
         "package_dir": "/tmp", "documents": [],
@@ -160,7 +160,7 @@ def test_graph_runs_end_to_end(tmp_path):
         "insurance_id": "INS123", "patient_name": "DOE JOHN",
         "patient_dob": "01011980", "billing_provider_npi": "1234567890",
         "diagnosis_codes": ["J06.9"],
-        "service_lines": [{"cpt_code": "99213", "date_of_service": "01012026", "charges": "150.00", "units": 1, "place_of_service": "11", "diagnosis_pointer": "A"}],
+        "service_lines": [{"cpt_code": "99213", "date_of_service": "01012026", "charges": "150.00", "units": 1, "place_of_service": "11", "diagnosis_pointer": "A"}],  # noqa: E501
         "total_charge": "150.00", "signature_on_file": True,
     }
     fake_extraction.fields = []

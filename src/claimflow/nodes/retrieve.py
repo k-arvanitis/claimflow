@@ -34,7 +34,6 @@ def _get_client() -> anthropic.Anthropic:
 
 
 def _failure_to_question(failure: dict) -> str:
-    field = failure["field"]
     rule = failure["rule"]
     reason = failure["reason"]
     if rule == "icd10_lookup":
@@ -70,7 +69,7 @@ def _synthesize(question: str, chunks: list[dict]) -> PolicyAnswer:
     reranker = _get_reranker()
     pairs = [(question, c["text"]) for c in chunks]
     scores = reranker.predict(pairs)
-    ranked = sorted(zip(scores, chunks), reverse=True)
+    ranked = sorted(zip(scores, chunks), key=lambda x: x[0], reverse=True)
     top = [c for _, c in ranked[:3]]
 
     context = "\n\n".join(f"[{i+1}] {c['text']}" for i, c in enumerate(top))

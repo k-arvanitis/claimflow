@@ -44,10 +44,15 @@ class ClaimData:
     errors: list  # [{field, rule}]
 
 
-def _random_date(year_range=(2025, 2026)) -> str:
-    y = random.randint(*year_range)
-    m = random.randint(1, 12)
-    d = random.randint(1, 28)
+def _random_date() -> str:
+    # ponytail: cap at 2026-06-30 to avoid future dates failing date_window validation
+    y = random.randint(2025, 2026)
+    if y == 2026:
+        m = random.randint(1, 6)
+        d = random.randint(1, 28) if m < 6 else random.randint(1, 30)
+    else:
+        m = random.randint(1, 12)
+        d = random.randint(1, 28)
     return f"{m:02d}{d:02d}{y}"
 
 
