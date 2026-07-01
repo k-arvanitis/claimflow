@@ -23,7 +23,10 @@ def _download_icd10() -> None:
     with urllib.request.urlopen(ICD10_URL) as r:
         data = r.read()
     with zipfile.ZipFile(io.BytesIO(data)) as z:
-        names = [n for n in z.namelist() if n.endswith("icd10cm_codes_2026.txt") or "codes" in n.lower() and n.endswith(".txt")]
+        names = [
+            n for n in z.namelist()
+            if n.endswith("icd10cm_codes_2026.txt") or ("codes" in n.lower() and n.endswith(".txt"))
+        ]
         if not names:
             raise RuntimeError(f"Unexpected zip contents: {z.namelist()}")
         raw = z.read(names[0]).decode("utf-8", errors="replace")
@@ -40,17 +43,42 @@ def _download_icd10() -> None:
     print(f"  → {out} ({count} codes)")
 
 
+def _generate_cpt_fallback(out: Path) -> None:
+    """Generate CPT codes from standard numeric ranges (used when CMS URL is unavailable)."""
+    ranges = [
+        (99201, 99499, "Evaluation and Management"),
+        (70010, 79999, "Radiology"),
+        (80047, 89398, "Pathology/Laboratory"),
+        (90281, 99607, "Medicine"),
+        (10021, 69990, "Surgery"),
+    ]
+    with open(out, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["code", "description"])
+        for start, end, category in ranges:
+            for code in range(start, end + 1):
+                w.writerow([str(code), category])
+    with open(out) as f:
+        count = sum(1 for _ in f) - 1
+    print(f"  → {out} ({count} codes, generated from ranges)")
+
+
 def _download_cpt() -> None:
     print("Downloading HCPCS Level II (CPT stand-in)...")
-    with urllib.request.urlopen(HCPCS_URL) as r:
-        data = r.read()
+    out = OUT / "cpt.csv"
+    try:
+        with urllib.request.urlopen(HCPCS_URL) as r:
+            data = r.read()
+    except Exception as e:
+        print(f"  HCPCS download failed ({e}), generating from CPT ranges instead")
+        _generate_cpt_fallback(out)
+        return
     with zipfile.ZipFile(io.BytesIO(data)) as z:
         names = [n for n in z.namelist() if n.lower().endswith(".xlsx") or n.lower().endswith(".txt")]
         if not names:
             raise RuntimeError(f"Unexpected HCPCS zip contents: {z.namelist()}")
         # Write as-is, parse first column as code
         raw = z.read(names[0]).decode("latin-1", errors="replace")
-    out = OUT / "cpt.csv"
     with open(out, "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["code", "description"])
