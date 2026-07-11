@@ -1,0 +1,32 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ClaimFlow real/public eval manifest entry",
+  "description": "One entry per downloaded or curated artifact, tracking provenance for the real/public eval layer.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": [
+      "doc_id", "dataset", "domain", "document_type", "source_url",
+      "local_path", "accessed_at", "sha256", "license_public_use_notes",
+      "pii_status", "split"
+    ],
+    "properties": {
+      "doc_id": {"type": "string", "description": "Unique identifier for this artifact"},
+      "dataset": {"type": "string", "description": "Which dataset this belongs to, e.g. 'funsd', 'cms_synpuf'"},
+      "domain": {"type": "string", "enum": ["health", "property", "loan", "horizontal"]},
+      "document_type": {"type": "string", "description": "e.g. 'cms1500', 'xactimate', 'form', 'claims_table'"},
+      "source_url": {"type": "string", "format": "uri"},
+      "local_path": {"type": "string", "description": "Path relative to repo root or $CLAIMFLOW_EVAL_DATA_DIR"},
+      "accessed_at": {"type": "string", "format": "date-time"},
+      "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+      "license_public_use_notes": {"type": "string"},
+      "pii_status": {
+        "type": "string",
+        "enum": ["public_sample", "synthetic_public", "public_non_pii", "unknown_check_manually"]
+      },
+      "split": {"type": "string", "description": "e.g. 'train', 'test', 'reference'"},
+      "gold_path": {"type": ["string", "null"], "description": "Path to this artifact's gold annotation file, if any"}
+    },
+    "additionalProperties": false
+  }
+}

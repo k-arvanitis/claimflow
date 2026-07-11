@@ -1,0 +1,107 @@
+{
+  "doc_id": "hhhroofing_example",
+  "domain": "property",
+  "task_type": "extraction",
+  "expected_classification": "xactimate",
+  "fields": [
+    {
+      "field_name": "insured_name",
+      "expected_value": null,
+      "value_type": "string",
+      "page": 1,
+      "evidence_quote": "Insured: [REDACTED - black bar]",
+      "expected_status": "unsupported",
+      "bbox": null
+    },
+    {
+      "field_name": "claim_number",
+      "expected_value": null,
+      "value_type": "string",
+      "page": 1,
+      "evidence_quote": "Claim Number: [REDACTED - black bar]",
+      "expected_status": "unsupported",
+      "bbox": null
+    },
+    {
+      "field_name": "property_address",
+      "expected_value": null,
+      "value_type": "string",
+      "page": 1,
+      "evidence_quote": "Property: [REDACTED - black bar]",
+      "expected_status": "unsupported",
+      "bbox": null
+    },
+    {
+      "field_name": "date_of_loss",
+      "expected_value": "04152021",
+      "normalized_value": "04152021",
+      "value_type": "date",
+      "page": 1,
+      "evidence_quote": "Date of Loss: 4/15/2021",
+      "expected_status": "found",
+      "bbox": null
+    },
+    {
+      "field_name": "cause_of_loss",
+      "expected_value": "Hail",
+      "value_type": "string",
+      "page": 1,
+      "evidence_quote": "Type of Loss: Hail",
+      "expected_status": "found",
+      "bbox": null
+    },
+    {
+      "field_name": "adjuster_name",
+      "expected_value": null,
+      "value_type": "string",
+      "page": null,
+      "evidence_quote": null,
+      "expected_status": "missing",
+      "bbox": null
+    },
+    {
+      "field_name": "total_replacement_cost",
+      "expected_value": "26360.08",
+      "value_type": "currency",
+      "page": 1,
+      "evidence_quote": "Replacement Cost Value 26,360.08",
+      "expected_status": "found",
+      "bbox": null
+    },
+    {
+      "field_name": "depreciation",
+      "expected_value": "12108.44",
+      "value_type": "currency",
+      "page": 1,
+      "evidence_quote": "Less Depreciation (Including Taxes) (12,108.44)",
+      "expected_status": "found",
+      "bbox": null
+    },
+    {
+      "field_name": "actual_cash_value",
+      "expected_value": "14251.64",
+      "value_type": "currency",
+      "page": 1,
+      "evidence_quote": "(computed: Replacement Cost Value 26,360.08 minus Less Depreciation 12,108.44 -- not printed as a single labeled figure)",
+      "expected_status": "found",
+      "bbox": null
+    },
+    {
+      "field_name": "deductible",
+      "expected_value": "7731.00",
+      "value_type": "currency",
+      "page": 1,
+      "evidence_quote": "Deductible: $7,731.00",
+      "expected_status": "found",
+      "bbox": null
+    }
+  ],
+  "tables": [
+    {
+      "table_name": "line_items",
+      "rows": []
+    }
+  ],
+  "expected_validation_failures": [],
+  "notes": "Real State Farm estimate, PII pre-redacted (black bars) by the original poster over insured name/property/claim number/policy number -- those fields are genuinely 'unsupported' (unreadable), not extraction misses. SCANNED/IMAGE-ONLY page (no text layer) -- exercises OCR fallback, not native text extraction. No line-item table is visible on this single summary page (a full Xactimate estimate would have a separate line-item page not included in this sample). IMPORTANT SUBTLETY: the document explicitly labels 'Net Actual Cash Value Payment' = $6,520.64, which is RCV minus depreciation minus deductible ($26,360.08 - $12,108.44 - $7,731.00) -- a deductible-adjusted claim PAYOUT, not the same concept as ClaimFlow's actual_cash_value field (which is RCV minus depreciation only, per domains/property.py's _validate acv_check: rcv - dep == acv). actual_cash_value's gold value here (14,251.64) is therefore a computed figure, not literally printed on the page as one number -- a model extracting the printed 'Net Actual Cash Value Payment' value instead would be extracting a real, correctly-read but differently-defined figure, not a wrong one; this is a genuine schema-vs-document ambiguity worth documenting rather than silently picking one interpretation as ground truth without explanation."
+}

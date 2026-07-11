@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable
 
 from doc_intel.schemas.base import SchemaSpec
@@ -12,6 +12,7 @@ class Domain:
     keywords: set[str]
     spec: SchemaSpec
     validate: Callable[[dict], list[ValidationFailure]]
+    supporting_types: dict[str, set[str]] = field(default_factory=dict)
 
 
 _REGISTRY: dict[str, Domain] = {}

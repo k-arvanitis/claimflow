@@ -1,0 +1,42 @@
+{
+  "sba_7a_foia": {
+    "n_loans_sampled": 2000,
+    "guaranteed_le_gross_rate": 1.0,
+    "amounts_checked": 2000,
+    "approval_date_not_future_rate": 1.0,
+    "dates_checked": 2000,
+    "naics_code_format_rate": 1.0,
+    "naics_checked": 2000
+  },
+  "sba_ppp_foia": {
+    "n_loans_sampled": 282,
+    "current_approval_positive_rate": 1.0,
+    "amounts_checked": 282,
+    "forgiveness_le_approved_rate": 1.0,
+    "forgiveness_checked": 277,
+    "jobs_reported_nonnegative_rate": 1.0,
+    "jobs_checked": 282
+  },
+  "sba_form_1919_template": {
+    "dataset": "sba_form_1919_official_template",
+    "status": "review",
+    "total_fields": 10,
+    "fabricated_field_count": 2,
+    "blank_field_abstention_rate": 0.8,
+    "fabricated_fields": {
+      "loan_amount_requested": 0.0,
+      "signature_on_file": false
+    }
+  },
+  "sba_form_413_template": {
+    "dataset": "sba_form_413_official_template",
+    "status": "review",
+    "total_fields": 25,
+    "fabricated_field_count": 2,
+    "blank_field_abstention_rate": 0.92,
+    "fabricated_fields": {
+      "cash_on_hand": 0.0,
+      "savings_accounts": 0.0
+    }
+  }
+}

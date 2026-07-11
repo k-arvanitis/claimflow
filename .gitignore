@@ -8,5 +8,8 @@ dist/
 build/
 data/synthetic/
 data/lookups/
+data/real_public/
+data/claimflow.db
+data/uploads/
 .superpowers/
 output/

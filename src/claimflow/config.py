@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     doc_intel_llm_base_url: str = ""  # empty = doc-intel default (official API)
 
     # Qdrant
-    qdrant_url: str = "http://localhost:6333"
+    qdrant_url: str = "http://localhost:6339"
     qdrant_collection: str = "claimflow_policies"
 
     # Thresholds
@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""
     langfuse_host: str = "https://cloud.langfuse.com"
+
+    # Persistence (SQLite job/audit store + uploaded-file staging dir).
+    # NOT encrypted at rest — see TODO.md.
+    db_path: str = "data/claimflow.db"
+    storage_dir: str = "data/uploads"
 
 
 settings = Settings()

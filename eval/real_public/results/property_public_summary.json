@@ -1,0 +1,12 @@
+{
+  "dataset": "fema_ihp",
+  "n_records": 50,
+  "amount_sanity_rate": 1.0,
+  "amounts_checked": 450,
+  "date_ordering_validity_rate": 1.0,
+  "dates_checked": 50,
+  "state_abbreviation_format_rate": 1.0,
+  "zip_format_rate": 1.0,
+  "ihp_eligibility_amount_consistency_rate": 1.0,
+  "consistency_checks": 50
+}

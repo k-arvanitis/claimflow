@@ -16,7 +16,7 @@ def test_ingest_node_classifies_cms1500(tmp_path):
         if "claim" in str(path):
             page.get_text.return_value = "HEALTH INSURANCE CLAIM FORM CMS-1500\nBox 1a: INS123"
         else:
-            page.get_text.return_value = "DISCHARGE SUMMARY\nPatient: John Doe"
+            page.get_text.return_value = "DISCHARGE SUMMARY\nPatient: John Doe\nDischarge diagnosis and instructions follow below in full detail."
         doc.__iter__ = lambda s: iter([page])
         doc.__len__ = lambda s: 1
         return doc
@@ -44,6 +44,9 @@ def test_ingest_node_classifies_cms1500(tmp_path):
     assert len(docs) == 2
     claim_doc = next(d for d in docs if d["doc_type"] == "cms1500")
     assert claim_doc["has_text_layer"] is True
+
+    other_doc = next(d for d in docs if d["path"] != claim_doc["path"])
+    assert other_doc["doc_type"] == "discharge_summary"
 
 
 def test_extract_node_calls_doc_intel(tmp_path):
@@ -159,7 +162,7 @@ def test_graph_runs_end_to_end(tmp_path):
     fake_extraction = MagicMock()
     fake_extraction.data = {
         "insurance_id": "INS123", "patient_name": "DOE JOHN",
-        "patient_dob": "01011980", "billing_provider_npi": "1234567890",
+        "patient_dob": "01011980", "billing_provider_npi": "1487293650",
         "diagnosis_codes": ["J06.9"],
         "service_lines": [{"cpt_code": "99213", "date_of_service": "01012026", "charges": "150.00", "units": 1, "place_of_service": "11", "diagnosis_pointer": "A"}],  # noqa: E501
         "total_charge": "150.00", "signature_on_file": True,
@@ -174,10 +177,52 @@ def test_graph_runs_end_to_end(tmp_path):
          patch("claimflow.lookups.cpt.is_valid_cpt", return_value=True):
         from claimflow.graph import build_graph
         app = build_graph()
-        result = app.invoke({"package_dir": str(tmp_path)})
+        result = app.invoke({"package_dir": str(tmp_path)}, config={"configurable": {"thread_id": "test"}})
 
     assert result["decision"] in ("approved", "flagged", "escalated")
     assert result["documents"]
+
+
+def test_ingest_node_handles_docx_and_image(tmp_path):
+    """Ingest node converts DOCX to PDF and opens images natively, classifying both."""
+    import docx
+    from PIL import Image
+
+    pkg = tmp_path / "package"
+    pkg.mkdir()
+
+    doc = docx.Document()
+    doc.add_paragraph("SBA LOAN APPLICATION\nBusiness loan application for Acme Corp.")
+    doc.save(str(pkg / "application.docx"))
+
+    Image.new("RGB", (100, 100), color="white").save(pkg / "photo.png")
+
+    from claimflow.nodes.ingest import ingest_node
+    from claimflow.state import ClaimState
+
+    state: ClaimState = {
+        "package_dir": str(pkg),
+        "documents": [],
+        "extraction_data": None,
+        "extraction_fields": None,
+        "extraction_status": None,
+        "extraction_overall_confidence": None,
+        "validation_failures": [],
+        "policy_answers": [],
+        "decision": None,
+        "review_reasons": [],
+        "error": None,
+    }
+    result = ingest_node(state)
+
+    docs = result["documents"]
+    assert len(docs) == 2
+    docx_doc = next(d for d in docs if d["path"].endswith(".pdf"))
+    assert docx_doc["doc_type"] == "loan"
+    assert result["domain"] == "loan"
+
+    image_doc = next(d for d in docs if d["path"].endswith(".png"))
+    assert image_doc["has_text_layer"] is False
 
 
 def test_retrieve_node_skipped_when_no_failures():

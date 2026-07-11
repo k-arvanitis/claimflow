@@ -1,0 +1,163 @@
+{
+  "doc_id": "empireestimators_sample1",
+  "domain": "property",
+  "task_type": "extraction",
+  "expected_classification": "xactimate",
+  "fields": [
+    {
+      "field_name": "insured_name",
+      "expected_value": "JOHN_ADAMS2",
+      "value_type": "string",
+      "page": 1,
+      "evidence_quote": "JOHN_ADAMS2",
+      "expected_status": "found",
+      "bbox": null
+    },
+    {
+      "field_name": "claim_number",
+      "expected_value": null,
+      "value_type": "string",
+      "page": null,
+      "evidence_quote": null,
+      "expected_status": "missing",
+      "bbox": null
+    },
+    {
+      "field_name": "property_address",
+      "expected_value": null,
+      "value_type": "string",
+      "page": null,
+      "evidence_quote": null,
+      "expected_status": "missing",
+      "bbox": null
+    },
+    {
+      "field_name": "date_of_loss",
+      "expected_value": "11212014",
+      "normalized_value": "11212014",
+      "value_type": "date",
+      "page": 1,
+      "evidence_quote": "11/21/2014",
+      "expected_status": "found",
+      "bbox": null
+    },
+    {
+      "field_name": "cause_of_loss",
+      "expected_value": null,
+      "value_type": "string",
+      "page": null,
+      "evidence_quote": null,
+      "expected_status": "missing",
+      "bbox": null
+    },
+    {
+      "field_name": "adjuster_name",
+      "expected_value": "Horace E Hostetler Jr",
+      "value_type": "string",
+      "page": 8,
+      "evidence_quote": "Horace E Hostetler Jr",
+      "expected_status": "found",
+      "bbox": null
+    },
+    {
+      "field_name": "total_replacement_cost",
+      "expected_value": "48151.75",
+      "value_type": "currency",
+      "page": 8,
+      "evidence_quote": "Replacement Cost Value $48,151.75",
+      "expected_status": "found",
+      "bbox": null
+    },
+    {
+      "field_name": "depreciation",
+      "expected_value": "2251.57",
+      "value_type": "currency",
+      "page": 8,
+      "evidence_quote": "Less Non-recoverable Depreciation <2,251.57>",
+      "expected_status": "found",
+      "bbox": null
+    },
+    {
+      "field_name": "actual_cash_value",
+      "expected_value": "45900.18",
+      "value_type": "currency",
+      "page": 8,
+      "evidence_quote": "Actual Cash Value $45,900.18",
+      "expected_status": "found",
+      "bbox": null
+    },
+    {
+      "field_name": "deductible",
+      "expected_value": null,
+      "value_type": "currency",
+      "page": null,
+      "evidence_quote": null,
+      "expected_status": "missing",
+      "bbox": null
+    }
+  ],
+  "tables": [
+    {
+      "table_name": "line_items",
+      "rows": [
+        {
+          "line_number": 2,
+          "description": "Engineered wood flooring - Premium grade",
+          "quantity": 196.88,
+          "unit": "SF",
+          "unit_cost": 14.45,
+          "rcv": 2844.92,
+          "depreciation": 113.80,
+          "acv": 2731.12,
+          "page": 1
+        },
+        {
+          "line_number": 16,
+          "description": "Engineered wood flooring - Premium grade",
+          "quantity": 789.69,
+          "unit": "SF",
+          "unit_cost": 14.45,
+          "rcv": 11411.02,
+          "depreciation": 456.44,
+          "acv": 10954.58,
+          "page": 3
+        },
+        {
+          "line_number": 25,
+          "description": "Paint the walls and ceiling - one coat",
+          "quantity": 1873.83,
+          "unit": "SF",
+          "unit_cost": 0.53,
+          "rcv": 993.13,
+          "depreciation": 132.42,
+          "acv": 860.71,
+          "page": 3
+        },
+        {
+          "line_number": 56,
+          "description": "Dumpster load - Approx. 12 yards, 1-3 tons of debris",
+          "quantity": 1.00,
+          "unit": "EA",
+          "unit_cost": 352.17,
+          "rcv": 352.17,
+          "depreciation": 0.00,
+          "acv": 352.17,
+          "page": 6
+        },
+        {
+          "line_number": 57,
+          "description": "General Laborer - per hour",
+          "quantity": 150.00,
+          "unit": "HR",
+          "unit_cost": 38.27,
+          "rcv": 5740.50,
+          "depreciation": 0.00,
+          "acv": 5740.50,
+          "page": 6
+        }
+      ]
+    }
+  ],
+  "expected_validation_failures": [],
+  "notes": "Real Xactimate estimate (9 pages, 57 line items total across 5 rooms + general labor). insured_name is a case/project code ('JOHN_ADAMS2'), not a formatted person name -- reflects the actual document, not an idealized synthetic one. claim_number, property_address, cause_of_loss, and deductible are genuinely absent from this document -- not extraction failures if the model also returns null for them. Arithmetic check: Line Item Total (38707.98) + 10% overhead (3870.83) + 10% profit (3870.83) + 9.25% material sales tax (1702.11) = 48151.75 = total_replacement_cost, confirmed by hand from the document's own summary page (page 8)."
+}

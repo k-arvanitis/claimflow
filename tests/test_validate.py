@@ -9,7 +9,7 @@ def clean_claim():
         "insurance_id": "INS123",
         "patient_name": "DOE JOHN",
         "patient_dob": "01011980",
-        "billing_provider_npi": "1234567890",
+        "billing_provider_npi": "1487293650",
         "diagnosis_codes": ["J06.9"],
         "service_lines": [
             {"cpt_code": "99213", "date_of_service": "01012026", "charges": "150.00", "units": 1, "place_of_service": "11", "diagnosis_pointer": "A"},  # noqa: E501

@@ -7,11 +7,11 @@ os.environ["DOC_INTEL_MODEL"] = settings.doc_intel_model
 if settings.doc_intel_llm_base_url:
     os.environ["DOC_INTEL_LLM_BASE_URL"] = settings.doc_intel_llm_base_url
 
+from doc_intel.extract import extract  # noqa: E402
+
 import claimflow.domains  # noqa: F401, E402
 from claimflow.domains.base import get as get_domain  # noqa: E402
 from claimflow.state import ClaimState  # noqa: E402
-
-from doc_intel.extract import extract  # noqa: E402
 
 
 def extract_node(state: ClaimState) -> dict:

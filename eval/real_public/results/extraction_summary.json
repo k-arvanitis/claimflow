@@ -1,0 +1,51 @@
+{
+  "n_documents": 3,
+  "n_errors": 0,
+  "mean_field_exact_accuracy": 1.0,
+  "mean_line_item_row_f1": 0.15353535353535355,
+  "validation_failures_by_doc": {
+    "empireestimators_sample1": [
+      {
+        "field": "total_replacement_cost",
+        "rule": "arithmetic",
+        "reason": "Line items sum $61350.37 does not match RCV $48151.75"
+      }
+    ],
+    "hhhroofing_example": [
+      {
+        "field": "claim_number",
+        "rule": "mandatory",
+        "reason": "claim_number is required but missing or empty"
+      },
+      {
+        "field": "line_items",
+        "rule": "mandatory",
+        "reason": "line_items is required but missing or empty"
+      },
+      {
+        "field": "total_replacement_cost",
+        "rule": "arithmetic",
+        "reason": "Line items sum $0.00 does not match RCV $26360.08"
+      }
+    ],
+    "workflowsolutions_roof_example3": [
+      {
+        "field": "claim_number",
+        "rule": "mandatory",
+        "reason": "claim_number is required but missing or empty"
+      }
+    ]
+  },
+  "additional_case_studies_n1": {
+    "cms_sample_eob": {
+      "field_exact_accuracy": 0.9090909090909091,
+      "validation_failures": [],
+      "error": null
+    },
+    "florida_cfo_sample_declarations": {
+      "field_exact_accuracy": 1.0,
+      "validation_failures": [],
+      "error": null
+    }
+  }
+}

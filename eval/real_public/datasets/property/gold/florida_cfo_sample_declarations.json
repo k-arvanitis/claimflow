@@ -1,0 +1,133 @@
+{
+  "doc_id": "florida_cfo_sample_declarations",
+  "domain": "property",
+  "task_type": "extraction",
+  "expected_classification": "declarations_page",
+  "fields": [
+    {
+      "field_name": "insured_name",
+      "expected_value": "Estelle Clarion & James Delaney",
+      "value_type": "string",
+      "page": 1,
+      "evidence_quote": "INSURED NAME AND ADDRESS: Estelle Clarion & James Delaney",
+      "expected_status": "found"
+    },
+    {
+      "field_name": "insured_address",
+      "expected_value": "596 Crossover Way, Clay, FL 17189-2021",
+      "value_type": "string",
+      "page": 1,
+      "evidence_quote": "596 Crossover Way Clay, FL 17189-2021",
+      "expected_status": "found"
+    },
+    {
+      "field_name": "policy_number",
+      "expected_value": "FHO295000",
+      "value_type": "string",
+      "page": 1,
+      "evidence_quote": "POLICY NO. FHO295000",
+      "expected_status": "found"
+    },
+    {
+      "field_name": "policy_period_start",
+      "expected_value": "03282020",
+      "normalized_value": "03282020",
+      "value_type": "date",
+      "page": 1,
+      "evidence_quote": "POLICY EFFECTIVE DATE: 3/28/20 to 3/28/2021",
+      "expected_status": "found"
+    },
+    {
+      "field_name": "policy_period_end",
+      "expected_value": "03282021",
+      "normalized_value": "03282021",
+      "value_type": "date",
+      "page": 1,
+      "evidence_quote": "POLICY EFFECTIVE DATE: 3/28/20 to 3/28/2021",
+      "expected_status": "found"
+    },
+    {
+      "field_name": "coverage_a_dwelling",
+      "expected_value": "160000",
+      "value_type": "currency",
+      "page": 1,
+      "evidence_quote": "Coverage A - Dwelling $160,000",
+      "expected_status": "found"
+    },
+    {
+      "field_name": "coverage_b_other_structures",
+      "expected_value": "3200",
+      "value_type": "currency",
+      "page": 1,
+      "evidence_quote": "Coverage B - Other Structures $3,200",
+      "expected_status": "found"
+    },
+    {
+      "field_name": "coverage_c_personal_property",
+      "expected_value": "104250",
+      "value_type": "currency",
+      "page": 1,
+      "evidence_quote": "Coverage C - Personal Property $104,250",
+      "expected_status": "found"
+    },
+    {
+      "field_name": "coverage_d_loss_of_use",
+      "expected_value": "20850",
+      "value_type": "currency",
+      "page": 1,
+      "evidence_quote": "Coverage D - Loss of Use $20,850",
+      "expected_status": "found"
+    },
+    {
+      "field_name": "deductible_all_other_perils",
+      "expected_value": "1000",
+      "value_type": "currency",
+      "page": 1,
+      "evidence_quote": "All Other Perils (other than Hurricane): $1,000",
+      "expected_status": "found"
+    },
+    {
+      "field_name": "deductible_hurricane",
+      "expected_value": "3200",
+      "value_type": "currency",
+      "page": 1,
+      "evidence_quote": "HURRICANE: 2% OF Coverage A $3,200",
+      "expected_status": "found"
+    },
+    {
+      "field_name": "premium_total",
+      "expected_value": "854.00",
+      "value_type": "currency",
+      "page": 1,
+      "evidence_quote": "TOTAL ANNUAL POLICY PREMIUM: $854.00",
+      "expected_status": "found"
+    },
+    {
+      "field_name": "mortgagee",
+      "expected_value": "Apollo Savings Mortgage Co",
+      "value_type": "string",
+      "page": 1,
+      "evidence_quote": "MORTGAGE INFORMATION: Apollo Savings Mortgage Co",
+      "expected_status": "found"
+    },
+    {
+      "field_name": "carrier_name",
+      "expected_value": "SAFE ALL INSURANCE COMPANY",
+      "value_type": "string",
+      "page": 1,
+      "evidence_quote": "SAFE ALL INSURANCE COMPANY / HOMEOWNERS POLICY DECLARATIONS",
+      "expected_status": "found"
+    },
+    {
+      "field_name": "agent_name",
+      "expected_value": "TONY PRIZE",
+      "value_type": "string",
+      "page": 1,
+      "evidence_quote": "AGENT: TONY PRIZE, #194722",
+      "expected_status": "found"
+    }
+  ],
+  "tables": [],
+  "expected_validation_failures": [],
+  "notes": "State-agency (Florida CFO) consumer-education sample declarations page -- fictional insured/carrier/policy numbers by design (a teaching sample, not a real policyholder document), but fully filled in (unlike the CMS-1500/SBA-1919/SBA-413 blank templates), so this is a genuine extraction-richness case study rather than a blank-field abstention test. deductible_hurricane is printed as '2% OF Coverage A / $3,200' -- the dollar figure is gold here since the schema field is a currency amount, not a percentage; a model extracting '2%' instead would be reading the same cell differently, worth documenting rather than silently marking wrong. Maryland Insurance Administration's declarations-page sample (also named in the original task spec) returns HTTP 403 to non-browser clients and could not be downloaded -- documented in failures.md, not substituted or faked."
+}

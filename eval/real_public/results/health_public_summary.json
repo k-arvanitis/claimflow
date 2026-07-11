@@ -1,0 +1,78 @@
+{
+  "synpuf": {
+    "dataset": "cms_synpuf",
+    "n_claims_sampled": 500,
+    "hcpcs_alphanumeric_code_acceptance_rate": 0.9889937106918238,
+    "hcpcs_alphanumeric_codes_checked": 636,
+    "cpt_range_numeric_codes_seen_but_out_of_scope": 2099,
+    "npi_format_validity_rate": 1.0,
+    "npis_checked": 481,
+    "date_ordering_validity_rate": 1.0,
+    "dates_checked": 489,
+    "skipped": {
+      "icd9_diagnosis_codes": "SynPUF diagnosis codes are ICD-9 (2008-2010 data, predates the 2015 ICD-10 transition); validating them against ClaimFlow's ICD-10 lookup would reject every code and misrepresent a code-system era mismatch as a validator failure.",
+      "cpt_range_numeric_codes": "SynPUF's HCPCS_CD_* fields also contain plain numeric CPT-style codes (e.g. lab procedure codes). A real HCPCS Level II lookup correctly excludes these (AMA-licensed CPT-4 content, a different code set) \u2014 counted above but not scored as pass/fail, same reasoning as the ICD-9 skip."
+    }
+  },
+  "nppes": {
+    "dataset": "nppes",
+    "n_npis_checked": 30,
+    "npi_format_valid_rate": 1.0,
+    "not_flagged_as_fabricated_rate": 1.0,
+    "all_records_active_status": true,
+    "skipped": {
+      "deactivated_npi_detection": "The NPI Registry search API used to fetch this sample only returned active (status='A') records; no deactivated NPIs were available to test rejection against. Not fabricated to fill the gap."
+    }
+  },
+  "cms1500_template": {
+    "dataset": "cms1500_official_template",
+    "status": "review",
+    "total_fields": 27,
+    "fabricated_field_count": 18,
+    "blank_field_abstention_rate": 0.3333333333333333,
+    "fabricated_fields": {
+      "insurance_id": "(ID#)",
+      "patient_name": "F, M",
+      "patient_dob": "MMDDYY",
+      "patient_sex": "F",
+      "insured_name": "(Last Name, First Name, Middle Initial)",
+      "insured_id": "(Policy Group or FECA Number)",
+      "referring_provider_name": "(Name of Referring Provider)",
+      "referring_provider_npi": "(NPI)",
+      "diagnosis_codes": [
+        "A",
+        "B",
+        "C",
+        "D",
+        "E",
+        "F",
+        "G",
+        "H",
+        "I",
+        "J",
+        "K",
+        "L"
+      ],
+      "service_lines": [
+        {
+          "cpt_code": "(CPT/HCPCS)",
+          "date_of_service": "MMDDYY",
+          "place_of_service": "(Place of Service)",
+          "diagnosis_pointer": "(Diagnosis Pointer)",
+          "charges": 0.0,
+          "units": 0,
+          "modifier": null,
+          "rendering_provider_npi": "(NPI)"
+        }
+      ],
+      "federal_tax_id": "(Federal Tax ID)",
+      "accept_assignment": true,
+      "total_charge": 0.0,
+      "amount_paid": 0.0,
+      "billing_provider_name": "(Billing Provider Name)",
+      "billing_provider_npi": "(Billing Provider NPI)",
+      "billing_provider_address": "(Billing Provider Address)",
+      "signature_on_file": true
+    }
+  }
+}

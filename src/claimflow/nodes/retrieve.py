@@ -1,9 +1,20 @@
 from __future__ import annotations
 
+import logging
 import os
 
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
+
 from claimflow.config import settings
+from claimflow.prompts import PROMPT_VERSION, RETRIEVAL_SYNTHESIS
 from claimflow.state import ClaimState, PolicyAnswer
+
+logger = logging.getLogger(__name__)
 
 _qdrant = None
 _reranker = None
@@ -79,8 +90,33 @@ def _search(question: str) -> list[dict]:
             limit=5,
         )
         return [{"text": h.document, "score": h.score} for h in hits]
-    except Exception:
+    except Exception as e:
+        logger.error("Qdrant search failed: %s", e)
         return []
+
+
+@retry(
+    retry=retry_if_exception_type(Exception),
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    before_sleep=lambda rs: logger.warning("LLM call failed, retrying (attempt %d)", rs.attempt_number),
+)
+def _call_llm(prompt: str) -> str:
+    provider, client = _get_llm_client()
+    if provider == "anthropic":
+        response = client.messages.create(
+            model=settings.llm_model,
+            max_tokens=512,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.content[0].text
+    else:
+        response = client.chat.completions.create(
+            model=settings.doc_intel_model,
+            max_tokens=512,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.choices[0].message.content or ""
 
 
 def _synthesize(question: str, chunks: list[dict]) -> PolicyAnswer:
@@ -94,28 +130,15 @@ def _synthesize(question: str, chunks: list[dict]) -> PolicyAnswer:
     top = [c for _, c in ranked[:3]]
 
     context = "\n\n".join(f"[{i+1}] {c['text']}" for i, c in enumerate(top))
-    prompt = (
-        f"Answer the following question using only the policy excerpts below. "
-        f"Cite sources as [1], [2], [3].\n\n"
-        f"Question: {question}\n\nPolicy excerpts:\n{context}"
-    )
+    prompt = RETRIEVAL_SYNTHESIS.format(question=question, context=context)
     citations = [f"policy excerpt [{i+1}]" for i in range(len(top))]
 
-    provider, client = _get_llm_client()
-    if provider == "anthropic":
-        response = client.messages.create(
-            model=settings.llm_model,
-            max_tokens=512,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        answer = response.content[0].text
-    else:
-        response = client.chat.completions.create(
-            model=settings.doc_intel_model,
-            max_tokens=512,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        answer = response.choices[0].message.content or ""
+    logger.info("Synthesising policy answer (prompt_version=%s)", PROMPT_VERSION)
+    try:
+        answer = _call_llm(prompt)
+    except Exception as e:
+        logger.error("LLM synthesis failed after retries: %s", e)
+        answer = "Policy lookup failed — manual review required."
 
     return PolicyAnswer(question=question, answer=answer, citations=citations)
 

@@ -1,8 +1,12 @@
 """Download ICD-10-CM and a public CPT substitute into data/lookups/.
 
 ICD-10-CM: CMS publishes annual code tables as CSV (public domain).
-CPT: AMA codes are proprietary; we use HCPCS Level II (public) as a
-     stand-in for the portfolio demo. Real deployments would use AMA data.
+CPT: AMA codes are proprietary; real HCPCS Level II data can't stand in for it either
+     (Level II structurally excludes CPT-4), so this generates a synthetic numeric-range
+     placeholder instead of fetching real HCPCS data — pretending to fetch "real" data
+     for a validator that can never check real CPT codes would be misleading. Real HCPCS
+     Level II data (for genuinely HCPCS-coded validation, not as a CPT stand-in) lives in
+     eval/real_public/scripts/download_real_public.py's download_real_hcpcs() instead.
 """
 import csv
 import io
@@ -14,8 +18,6 @@ OUT = Path(__file__).parent.parent / "data" / "lookups"
 OUT.mkdir(parents=True, exist_ok=True)
 
 ICD10_URL = "https://www.cms.gov/files/zip/2026-code-descriptions-tabular-order.zip"
-# HCPCS Level II (public) as CPT substitute for demo
-HCPCS_URL = "https://www.cms.gov/files/zip/2025-alpha-numeric-hcpcs-file.zip"
 
 
 def _download_icd10() -> None:
@@ -64,30 +66,8 @@ def _generate_cpt_fallback(out: Path) -> None:
 
 
 def _download_cpt() -> None:
-    print("Downloading HCPCS Level II (CPT stand-in)...")
-    out = OUT / "cpt.csv"
-    try:
-        with urllib.request.urlopen(HCPCS_URL) as r:
-            data = r.read()
-    except Exception as e:
-        print(f"  HCPCS download failed ({e}), generating from CPT ranges instead")
-        _generate_cpt_fallback(out)
-        return
-    with zipfile.ZipFile(io.BytesIO(data)) as z:
-        names = [n for n in z.namelist() if n.lower().endswith(".xlsx") or n.lower().endswith(".txt")]
-        if not names:
-            raise RuntimeError(f"Unexpected HCPCS zip contents: {z.namelist()}")
-        # Write as-is, parse first column as code
-        raw = z.read(names[0]).decode("latin-1", errors="replace")
-    with open(out, "w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(["code", "description"])
-        for line in raw.splitlines():
-            if line.strip():
-                parts = line.split()
-                if parts and len(parts[0]) <= 7:
-                    w.writerow([parts[0], " ".join(parts[1:])])
-    print(f"  → {out}")
+    print("Generating CPT stand-in (synthetic numeric ranges)...")
+    _generate_cpt_fallback(OUT / "cpt.csv")
 
 
 if __name__ == "__main__":

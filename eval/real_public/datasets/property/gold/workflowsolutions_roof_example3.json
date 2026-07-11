@@ -1,0 +1,140 @@
+{
+  "doc_id": "workflowsolutions_roof_example3",
+  "domain": "property",
+  "task_type": "extraction",
+  "expected_classification": "xactimate",
+  "fields": [
+    {
+      "field_name": "insured_name",
+      "expected_value": null,
+      "value_type": "string",
+      "page": null,
+      "evidence_quote": null,
+      "expected_status": "missing",
+      "bbox": null
+    },
+    {
+      "field_name": "claim_number",
+      "expected_value": null,
+      "value_type": "string",
+      "page": null,
+      "evidence_quote": null,
+      "expected_status": "missing",
+      "bbox": null
+    },
+    {
+      "field_name": "property_address",
+      "expected_value": "Union Grove, AL 35175",
+      "value_type": "string",
+      "page": 1,
+      "evidence_quote": "Property: Union Grove, AL 35175",
+      "expected_status": "found",
+      "bbox": null
+    },
+    {
+      "field_name": "date_of_loss",
+      "expected_value": null,
+      "value_type": "date",
+      "page": null,
+      "evidence_quote": null,
+      "expected_status": "missing",
+      "bbox": null
+    },
+    {
+      "field_name": "cause_of_loss",
+      "expected_value": "hail and wind damage",
+      "value_type": "string",
+      "page": 1,
+      "evidence_quote": "Type of Estimate: hail and wind damage",
+      "expected_status": "found",
+      "bbox": null
+    },
+    {
+      "field_name": "adjuster_name",
+      "expected_value": null,
+      "value_type": "string",
+      "page": null,
+      "evidence_quote": null,
+      "expected_status": "missing",
+      "bbox": null
+    },
+    {
+      "field_name": "total_replacement_cost",
+      "expected_value": "21997.14",
+      "value_type": "currency",
+      "page": 3,
+      "evidence_quote": "Replacement Cost Value $21,997.14",
+      "expected_status": "found",
+      "bbox": null
+    },
+    {
+      "field_name": "depreciation",
+      "expected_value": "0.00",
+      "value_type": "currency",
+      "page": 2,
+      "evidence_quote": "Totals: Dwelling Roof 679.59 21,997.14 0.00 21,997.14",
+      "expected_status": "found",
+      "bbox": null
+    },
+    {
+      "field_name": "actual_cash_value",
+      "expected_value": "21997.14",
+      "value_type": "currency",
+      "page": 2,
+      "evidence_quote": "Totals: Dwelling Roof 679.59 21,997.14 0.00 21,997.14",
+      "expected_status": "found",
+      "bbox": null
+    },
+    {
+      "field_name": "deductible",
+      "expected_value": null,
+      "value_type": "currency",
+      "page": null,
+      "evidence_quote": null,
+      "expected_status": "missing",
+      "bbox": null
+    }
+  ],
+  "tables": [
+    {
+      "table_name": "line_items",
+      "rows": [
+        {
+          "line_number": 2,
+          "description": "Laminated - comp. shingle rfg. - w/out felt",
+          "quantity": 60.00,
+          "unit": "SQ",
+          "unit_cost": 185.00,
+          "rcv": 11659.08,
+          "depreciation": 0.00,
+          "acv": 11659.08,
+          "page": 2
+        },
+        {
+          "line_number": 4,
+          "description": "R&R Continuous ridge vent - shingle-over style",
+          "quantity": 136.14,
+          "unit": "LF",
+          "unit_cost": 7.31,
+          "rcv": 1040.92,
+          "depreciation": 0.00,
+          "acv": 1040.92,
+          "page": 2
+        },
+        {
+          "line_number": 6,
+          "description": "R&R Flashing - pipe jack",
+          "quantity": 2.00,
+          "unit": "EA",
+          "unit_cost": 38.49,
+          "rcv": 79.59,
+          "depreciation": 0.00,
+          "acv": 79.59,
+          "page": 2
+        }
+      ]
+    }
+  ],
+  "expected_validation_failures": [],
+  "notes": "This is a BLANK TEMPLATE with placeholders ('Your Company Name Here', no real insured/claim number) -- a real, unedited public marketing sample from an estimator's website, not a completed real claim. depreciation is genuinely 0.00 throughout (no depreciation applied in this template), so actual_cash_value == total_replacement_cost -- not a bug if a model returns them equal. CORRECTED: adjuster_name is genuinely missing, not the 'Estimator' field -- the estimator is the contractor's own preparer, not an insurance company's claims adjuster; an earlier version of this gold file incorrectly mapped them as the same role."
+}

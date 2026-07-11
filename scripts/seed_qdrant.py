@@ -8,7 +8,6 @@ from pathlib import Path
 
 import fitz
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams
 
 from claimflow.config import settings
 
@@ -41,11 +40,12 @@ def main() -> None:
 
     client = QdrantClient(url=settings.qdrant_url)
 
-    # ponytail: recreate_collection resets the index; fine for a seed script
-    client.recreate_collection(
-        collection_name=settings.qdrant_collection,
-        vectors_config=VectorParams(size=384, distance=Distance.COSINE),
-    )
+    collections = {c.name for c in client.get_collections().collections}
+    if settings.qdrant_collection in collections:
+        client.delete_collection(settings.qdrant_collection)
+    # No manual create_collection — client.add()/client.query() (FastEmbed's managed API,
+    # also used in retrieve.py) auto-creates the collection with the named-vector schema
+    # they expect. A manually created unnamed-vector collection is incompatible with them.
 
     pdfs = list(args.policies.glob("*.pdf"))
     if not pdfs:

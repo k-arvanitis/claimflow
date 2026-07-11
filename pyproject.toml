@@ -3,7 +3,7 @@ name = "claimflow"
 version = "0.1.0"
 requires-python = ">=3.13"
 dependencies = [
-    "doc-intel",
+    "doc-intel[ocr]",
     "langgraph>=0.2.0",
     "anthropic>=0.105.0",
     "fastapi>=0.115.0",
@@ -16,6 +16,8 @@ dependencies = [
     "httpx>=0.28.0",
     "python-multipart>=0.0.32",
     "streamlit>=1.58.0",
+    "rapidfuzz>=3.0.0",
+    "sqlalchemy>=2.0.51",
 ]
 
 [project.optional-dependencies]
@@ -23,6 +25,10 @@ dev = [
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",
     "ruff>=0.8.0",
+]
+eval-real-public = [
+    "datasets>=5.0.0",
+    "openpyxl>=3.1.5",
 ]
 
 [tool.uv.sources]
@@ -32,10 +38,11 @@ doc-intel = { path = "../doc-intel", editable = true }
 pythonpath = ["."]
 
 [tool.ruff]
-line-length = 120
+line-length = 88
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
+ignore = ["E501"]
 
 [build-system]
 requires = ["hatchling"]

@@ -1,10 +1,15 @@
+import re
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
-from claimflow.domains.base import Domain, register
-from claimflow.state import ValidationFailure
 from doc_intel.schemas.base import BaseExtraction, SchemaSpec
 from pydantic import Field
+from rapidfuzz import fuzz
+
+from claimflow.domains.base import Domain, register
+from claimflow.prompts import DECLARATIONS_PAGE_EXTRACTION as _DECLARATIONS_PROMPT
+from claimflow.prompts import PROPERTY_EXTRACTION as _PROPERTY_PROMPT
+from claimflow.state import ValidationFailure
 
 
 class LineItem(BaseExtraction):
@@ -17,7 +22,9 @@ class LineItem(BaseExtraction):
 
 
 class XactimatePDF(BaseExtraction):
-    claim_number: str = Field(description="Insurance claim number")
+    claim_number: str | None = Field(
+        default=None, description="Insurance claim number; null if the field is blank on the form",
+    )
     insured_name: str = Field(description="Name of insured property owner")
     property_address: str = Field(description="Full address of damaged property")
     date_of_loss: str = Field(description="Date of loss MMDDYYYY")
@@ -33,12 +40,7 @@ class XactimatePDF(BaseExtraction):
 _SPEC = SchemaSpec(
     name="xactimate",
     model=XactimatePDF,
-    system_prompt=(
-        "Extract all fields from this Xactimate property damage estimate. "
-        "Line items each have a category, description, quantity, unit, unit cost, and total. "
-        "RCV = total replacement cost value. ACV = RCV minus depreciation. "
-        "For dates use MMDDYYYY format."
-    ),
+    system_prompt=_PROPERTY_PROMPT,
 )
 
 _MANDATORY = [
@@ -62,6 +64,14 @@ def _validate(data: dict) -> list[ValidationFailure]:
         if not val and val != 0:
             failures.append(ValidationFailure(field=field, rule="mandatory",
                 reason=f"{field} is required but missing or empty"))
+
+    # A real claim/reference number always contains at least one digit, regardless of the
+    # insurer's specific prefix convention. Models asked to extract a blank claim number
+    # sometimes substitute a name from elsewhere on the form instead of returning null.
+    claim_number = data.get("claim_number")
+    if claim_number and not re.search(r"\d", str(claim_number)):
+        failures.append(ValidationFailure(field="claim_number", rule="mandatory",
+            reason=f"'{claim_number}' has no digits — looks like a name, not a claim number"))
 
     lines = data.get("line_items") or []
 
@@ -106,11 +116,110 @@ def _validate(data: dict) -> list[ValidationFailure]:
     return failures
 
 
+_SUPPORTING_TYPES = {
+    "loss_report": {"loss report", "date of loss", "cause of loss", "first notice of loss"},
+    "contractor_invoice": {"contractor invoice", "labor and materials", "invoice for repairs"},
+    "adjuster_notes": {"adjuster notes", "field adjuster", "claim inspection", "adjuster assigned"},
+    # Classification-only — recognized and routed for manual triage, no extraction pipeline.
+    "roof_inspection_report": {"roof inspection", "roof condition report", "roof certification"},
+    "damage_photo": {"photo log", "damage photo", "photograph attached"},  # see README: needs VLM for real reasoning
+    "material_receipt": {"receipt", "material invoice", "purchase receipt"},
+    "fire_report": {"fire department report", "fire incident report", "fire marshal"},
+    "police_report": {"police report", "incident report number", "law enforcement report"},
+}
+
 PROPERTY = Domain(
     doc_type="xactimate",
     keywords={"xactimate", "property damage estimate", "replacement cost value", "actual cash value"},
     spec=_SPEC,
     validate=_validate,
+    supporting_types=_SUPPORTING_TYPES,
 )
 
 register(PROPERTY)
+
+
+class DeclarationsPage(BaseExtraction):
+    insured_name: str = Field(description="Named insured on the policy")
+    insured_address: str | None = Field(default=None, description="Named insured's mailing address")
+    policy_number: str | None = Field(default=None, description="Policy number; null if the field is blank")
+    policy_period_start: str | None = Field(default=None, description="Policy period start date MMDDYYYY")
+    policy_period_end: str | None = Field(default=None, description="Policy period end date MMDDYYYY")
+    coverage_a_dwelling: float | None = Field(default=None, description="Coverage A — dwelling limit")
+    coverage_b_other_structures: float | None = Field(default=None, description="Coverage B — other structures limit")
+    coverage_c_personal_property: float | None = Field(default=None, description="Coverage C — personal property limit")
+    coverage_d_loss_of_use: float | None = Field(default=None, description="Coverage D — loss of use limit")
+    deductible_all_other_perils: float | None = Field(default=None, description="All-other-perils deductible")
+    deductible_hurricane: float | None = Field(default=None, description="Hurricane/named-storm deductible")
+    premium_total: float | None = Field(default=None, description="Total policy premium")
+    mortgagee: str | None = Field(default=None, description="Mortgagee/lienholder name if listed")
+    carrier_name: str | None = Field(default=None, description="Insurance carrier name")
+    agent_name: str | None = Field(default=None, description="Producing agent/agency name")
+
+
+_DECLARATIONS_SPEC = SchemaSpec(
+    name="declarations_page",
+    model=DeclarationsPage,
+    system_prompt=_DECLARATIONS_PROMPT,
+)
+
+_DECLARATIONS_MANDATORY = ["insured_name", "policy_period_start", "policy_period_end"]
+
+
+def _validate_declarations(data: dict) -> list[ValidationFailure]:
+    failures: list[ValidationFailure] = []
+
+    for field in _DECLARATIONS_MANDATORY:
+        val = data.get(field)
+        if not val:
+            failures.append(ValidationFailure(field=field, rule="mandatory",
+                reason=f"{field} is required but missing or empty"))
+
+    policy_number = data.get("policy_number")
+    if policy_number and not re.search(r"\d", str(policy_number)):
+        failures.append(ValidationFailure(field="policy_number", rule="mandatory",
+            reason=f"'{policy_number}' has no digits — looks like a placeholder, not a policy number"))
+
+    start = _parse_date(data.get("policy_period_start") or "")
+    end = _parse_date(data.get("policy_period_end") or "")
+    if start and end and start > end:
+        failures.append(ValidationFailure(field="policy_period_start", rule="date_window",
+            reason=f"Policy period start {data['policy_period_start']} is after end {data['policy_period_end']}"))
+
+    # Cross-document check (date_of_loss falling inside this policy's period) only runs when
+    # a caller has merged that field in from the claim document — this domain's own extraction
+    # is a single, standalone document, so date_of_loss isn't present unless explicitly merged.
+    date_of_loss = _parse_date(data.get("date_of_loss") or "")
+    if date_of_loss and start and end and not (start <= date_of_loss <= end):
+        failures.append(ValidationFailure(field="date_of_loss", rule="date_window",
+            reason=f"Date of loss {data['date_of_loss']} falls outside the policy period"))
+
+    # Same cross-document caveat as above — property_address is only present if merged in.
+    property_address = data.get("property_address")
+    insured_address = data.get("insured_address")
+    if property_address and insured_address and fuzz.ratio(str(property_address), str(insured_address)) < 70:
+        failures.append(ValidationFailure(field="insured_address", rule="address_consistency",
+            reason=f"Claim property address '{property_address}' does not fuzzy-match insured address '{insured_address}'"))
+
+    for field in (
+        "coverage_a_dwelling", "coverage_b_other_structures", "coverage_c_personal_property",
+        "coverage_d_loss_of_use", "deductible_all_other_perils", "deductible_hurricane", "premium_total",
+    ):
+        val = data.get(field)
+        try:
+            if val is not None and float(val) < 0:
+                failures.append(ValidationFailure(field=field, rule="negative_amount",
+                    reason=f"{field} cannot be negative"))
+        except (TypeError, ValueError):
+            pass
+
+    return failures
+
+
+DECLARATIONS_PAGE = Domain(
+    doc_type="declarations_page",
+    keywords={"declarations page", "policy declarations", "insurance declarations"},
+    spec=_DECLARATIONS_SPEC,
+    validate=_validate_declarations,
+)
+register(DECLARATIONS_PAGE)

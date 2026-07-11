@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ClaimFlow real/public eval result row",
+  "description": "One evaluated row (JSONL) produced by run_real_public_eval.py.",
+  "type": "object",
+  "required": ["run_id", "dataset", "doc_id", "domain", "task_type", "passed"],
+  "properties": {
+    "run_id": {"type": "string"},
+    "dataset": {"type": "string"},
+    "doc_id": {"type": "string"},
+    "domain": {"type": "string", "enum": ["health", "property", "loan", "horizontal"]},
+    "task_type": {
+      "type": "string",
+      "enum": ["ocr_layout", "classification", "extraction", "validation", "e2e"]
+    },
+    "metric_group": {"type": ["string", "null"]},
+    "passed": {"type": "boolean"},
+    "scores": {"type": "object"},
+    "prediction": {},
+    "gold": {},
+    "failure_category": {"type": ["string", "null"]},
+    "error": {"type": ["string", "null"]},
+    "latency_ms": {"type": ["number", "null"]}
+  },
+  "additionalProperties": false
+}

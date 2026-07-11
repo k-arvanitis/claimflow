@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 import fitz  # PyMuPDF
@@ -7,50 +8,107 @@ from claimflow.domains.base import all_domains
 from claimflow.state import ClaimState, IngestedDoc
 
 _TEXT_THRESHOLD = 50
+_OCR_LOW_CONF_THRESHOLD = 20  # chars; below this, OCR likely failed on a low-quality scan
+
+# fitz opens PDFs and raster images natively (an image becomes a 1-page pseudo-PDF).
+# DOCX has no such native support, so it's converted to PDF first — after that every
+# input goes through the exact same page-based pipeline (classification, OCR, bbox evidence).
+_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".tiff", ".bmp"}
+_OFFICE_SUFFIXES = {".docx"}
+_INGESTIBLE_SUFFIXES = {".pdf"} | _IMAGE_SUFFIXES | _OFFICE_SUFFIXES
 
 
-def _ocr_first_page(doc: fitz.Document) -> str:
-    """Run tesseract OCR on the first page of a scanned PDF via fitz built-in."""
-    if len(doc) == 0:
+def _office_to_pdf(path: Path, out_dir: Path) -> Path:
+    """Convert a DOCX to PDF via headless LibreOffice."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["libreoffice", "--headless", "--convert-to", "pdf", "--outdir", str(out_dir), str(path)],
+        check=True, capture_output=True, timeout=60,
+    )
+    pdf_path = out_dir / f"{path.stem}.pdf"
+    if not pdf_path.exists():
+        raise FileNotFoundError(f"LibreOffice did not produce {pdf_path}")
+    return pdf_path
+
+
+def ocr_page(doc: fitz.Document, page_index: int) -> str:
+    """Run tesseract OCR on one page of a scanned PDF via fitz's built-in OCR."""
+    if page_index >= len(doc):
         return ""
     try:
-        page = doc[0]
+        page = doc[page_index]
         tp = page.get_textpage_ocr(dpi=300, full=False)
         return page.get_text(textpage=tp)
     except Exception:
         return ""
 
 
+def _scan_quality(text: str) -> float:
+    """Heuristic OCR quality proxy: extracted character count relative to a normal
+    text page, capped at 1.0. Not a real per-word confidence score (fitz's tesseract
+    wrapper doesn't expose one) — a density signal to flag likely-failed scans."""
+    return min(len(text.strip()) / (_TEXT_THRESHOLD * 4), 1.0)
+
+
 def _classify_doc_type(text: str) -> str:
+    """Classify a document into a specific type. A domain's main form takes priority
+    over supporting-document subtypes, so generic terms in a supporting doc can't
+    steal the match away from the form itself."""
     lower = text.lower()
     for domain in all_domains():
         if any(kw in lower for kw in domain.keywords):
             return domain.doc_type
-    return "supporting"
+    for domain in all_domains():
+        for subtype, keywords in domain.supporting_types.items():
+            if any(kw in lower for kw in keywords):
+                return subtype
+    return "unknown"
 
 
 def ingest_node(state: ClaimState) -> dict:
     pkg = Path(state["package_dir"])
-    pdfs = sorted(pkg.glob("*.pdf"))
-    if not pdfs:
-        return {"error": f"No PDFs found in {pkg}", "documents": [], "domain": None}
+    sources = sorted(p for p in pkg.iterdir() if p.suffix.lower() in _INGESTIBLE_SUFFIXES)
+    if not sources:
+        return {"error": f"No supported documents found in {pkg}", "documents": [], "domain": None}
 
+    domain_keys = {d.doc_type for d in all_domains()}
     docs: list[IngestedDoc] = []
+    ocr_log: list[str] = []
     detected_domain: str | None = None
-    for pdf_path in pdfs:
+    convert_dir = pkg / ".converted"
+    for src_path in sources:
+        name = src_path.name
         try:
+            if src_path.suffix.lower() in _OFFICE_SUFFIXES:
+                pdf_path = _office_to_pdf(src_path, convert_dir)
+                ocr_log.append(f"{name}: converted to PDF for processing")
+            else:
+                pdf_path = src_path
+
             doc = fitz.open(str(pdf_path))
             first_page_text = next(iter(doc)).get_text() if len(doc) > 0 else ""
             has_text = len(first_page_text.strip()) >= _TEXT_THRESHOLD
+            scan_quality: float | None = None
 
             if not has_text:
-                first_page_text = _ocr_first_page(doc)
+                ocr_log.append(f"{name}: page 1 has no text layer — falling back to OCR")
+                first_page_text = ocr_page(doc, 0)
+                scan_quality = _scan_quality(first_page_text)
+                if len(first_page_text.strip()) < _OCR_LOW_CONF_THRESHOLD:
+                    ocr_log.append(
+                        f"{name}: OCR yielded very little text ({len(first_page_text.strip())} chars) "
+                        "— possible low-quality scan"
+                    )
 
             doc_type = _classify_doc_type(first_page_text)
-            if doc_type != "supporting" and detected_domain is None:
+            if doc_type in domain_keys and detected_domain is None:
                 detected_domain = doc_type
-            docs.append(IngestedDoc(path=str(pdf_path), doc_type=doc_type, has_text_layer=has_text))
+            docs.append(IngestedDoc(
+                path=str(pdf_path), doc_type=doc_type,
+                has_text_layer=has_text, scan_quality=scan_quality,
+            ))
         except Exception:
-            docs.append(IngestedDoc(path=str(pdf_path), doc_type="unknown", has_text_layer=False))
+            ocr_log.append(f"{name}: ingest failed, marked unknown")
+            docs.append(IngestedDoc(path=str(src_path), doc_type="unknown", has_text_layer=False, scan_quality=None))
 
-    return {"documents": docs, "domain": detected_domain}
+    return {"documents": docs, "domain": detected_domain, "ocr_log": ocr_log}

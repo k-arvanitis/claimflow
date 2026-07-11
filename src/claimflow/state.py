@@ -3,8 +3,9 @@ from typing import Literal, TypedDict
 
 class IngestedDoc(TypedDict):
     path: str
-    doc_type: str           # "cms1500" | "supporting" | "unknown"
+    doc_type: str           # domain form key (e.g. "cms1500"), a supporting subtype (e.g. "medical_bill"), or "unknown"
     has_text_layer: bool
+    scan_quality: float | None   # set only when OCR fallback ran on page 1; density heuristic, not real OCR confidence
 
 
 class ValidationFailure(TypedDict):
@@ -26,6 +27,7 @@ class ClaimState(TypedDict):
 
     # Ingest output
     documents: list[IngestedDoc]
+    ocr_log: list[str]
 
     # Extract output — serialized ExtractionResult fields
     extraction_data: dict | None          # raw field values

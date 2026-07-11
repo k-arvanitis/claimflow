@@ -1,0 +1,132 @@
+{
+  "doc_id": "cms_sample_eob",
+  "domain": "health",
+  "task_type": "extraction",
+  "expected_classification": "eob",
+  "fields": [
+    {
+      "field_name": "payer_name",
+      "expected_value": null,
+      "value_type": "string",
+      "page": 1,
+      "evidence_quote": null,
+      "expected_status": "missing"
+    },
+    {
+      "field_name": "patient_name",
+      "expected_value": null,
+      "value_type": "string",
+      "page": 1,
+      "evidence_quote": "Patient Name: XXXXXX",
+      "expected_status": "missing"
+    },
+    {
+      "field_name": "provider_name",
+      "expected_value": null,
+      "value_type": "string",
+      "page": 1,
+      "evidence_quote": "Provider:",
+      "expected_status": "missing"
+    },
+    {
+      "field_name": "claim_number",
+      "expected_value": null,
+      "value_type": "string",
+      "page": 1,
+      "evidence_quote": "Claim Number: XXXXXXXX",
+      "expected_status": "missing"
+    },
+    {
+      "field_name": "service_date",
+      "expected_value": "03202022",
+      "normalized_value": "03202022",
+      "value_type": "date",
+      "page": 1,
+      "evidence_quote": "3/20/22-3/20/22 (both service lines)",
+      "expected_status": "found"
+    },
+    {
+      "field_name": "service_description",
+      "expected_value": "Medical care",
+      "value_type": "string",
+      "page": 1,
+      "evidence_quote": "Medical care",
+      "expected_status": "found"
+    },
+    {
+      "field_name": "provider_charges",
+      "expected_value": "406.60",
+      "value_type": "currency",
+      "page": 1,
+      "evidence_quote": "Total ... Provider Charges 406.60",
+      "expected_status": "found"
+    },
+    {
+      "field_name": "allowed_charges",
+      "expected_value": "120.27",
+      "value_type": "currency",
+      "page": 1,
+      "evidence_quote": "Total ... Allowed Charges 120.27",
+      "expected_status": "found"
+    },
+    {
+      "field_name": "plan_paid",
+      "expected_value": "85.27",
+      "value_type": "currency",
+      "page": 1,
+      "evidence_quote": "Total ... Paid by Insurer 85.27",
+      "expected_status": "found"
+    },
+    {
+      "field_name": "patient_responsibility",
+      "expected_value": "35.00",
+      "value_type": "currency",
+      "page": 1,
+      "evidence_quote": "Total ... What You Owe 35.00",
+      "expected_status": "found"
+    },
+    {
+      "field_name": "deductible_amount",
+      "expected_value": "0.00",
+      "value_type": "currency",
+      "page": 1,
+      "evidence_quote": "Total ... Deductible 0.00",
+      "expected_status": "found"
+    },
+    {
+      "field_name": "coinsurance_amount",
+      "expected_value": "0.00",
+      "value_type": "currency",
+      "page": 1,
+      "evidence_quote": "Total ... Coinsurance 0.00",
+      "expected_status": "found"
+    },
+    {
+      "field_name": "copay_amount",
+      "expected_value": "35.00",
+      "value_type": "currency",
+      "page": 1,
+      "evidence_quote": "Total ... Co Pay 35.00",
+      "expected_status": "found"
+    },
+    {
+      "field_name": "denial_or_remark_codes",
+      "expected_value": "PDC",
+      "value_type": "code",
+      "page": 1,
+      "evidence_quote": "Remark Code: PDC",
+      "expected_status": "found"
+    },
+    {
+      "field_name": "is_bill",
+      "expected_value": "False",
+      "value_type": "boolean",
+      "page": 1,
+      "evidence_quote": "THIS IS NOT A BILL",
+      "expected_status": "found"
+    }
+  ],
+  "tables": [],
+  "expected_validation_failures": [],
+  "notes": "This is CMS's own 'how to read your EOB' teaching example, not a real member's EOB -- identity fields (patient name, claim number, provider, payer) are deliberately printed as literal 'XXXXXX' placeholder text, not real values; a correct extraction returns null for these, not the placeholder string itself. The document has 2 real service line rows plus a 'Total' row with real dollar figures -- ClaimFlow's EOB schema is scalar (no line_items list), so this gold uses the document's own printed 'Total' row for provider_charges/allowed_charges/plan_paid/patient_responsibility/deductible/coinsurance/copay, which is the only single-record-shaped real data on the page. denial_or_remark_codes is schema-typed as list[str] but only one code (PDC) appears on this document. is_bill=False is the one field this document is entirely about -- 'THIS IS NOT A BILL' is printed in large bold text at the top."
+}

@@ -1,3 +1,4 @@
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 
 from claimflow.nodes.extract import extract_node
@@ -30,4 +31,4 @@ def build_graph():
     g.add_edge("retrieve", "review")
     g.add_edge("review", END)
 
-    return g.compile()
+    return g.compile(checkpointer=MemorySaver())

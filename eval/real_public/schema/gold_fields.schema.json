@@ -1,0 +1,72 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ClaimFlow real/public eval gold annotation",
+  "description": "Ground-truth annotation for one document in the real/public eval layer.",
+  "type": "object",
+  "required": ["doc_id", "domain", "task_type"],
+  "properties": {
+    "doc_id": {"type": "string"},
+    "domain": {"type": "string", "enum": ["health", "property", "loan", "horizontal"]},
+    "task_type": {
+      "type": "string",
+      "enum": ["ocr_layout", "classification", "extraction", "validation", "e2e"]
+    },
+    "expected_classification": {"type": ["string", "null"]},
+    "fields": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["field_name", "value_type"],
+        "properties": {
+          "field_name": {"type": "string"},
+          "expected_value": {},
+          "normalized_value": {},
+          "value_type": {
+            "type": "string",
+            "enum": ["string", "date", "currency", "number", "code", "boolean"]
+          },
+          "page": {"type": ["integer", "null"]},
+          "evidence_quote": {"type": ["string", "null"]},
+          "bbox": {
+            "type": ["array", "null"],
+            "items": {"type": "number"},
+            "minItems": 4,
+            "maxItems": 4
+          },
+          "expected_status": {
+            "type": "string",
+            "enum": ["found", "missing", "invalid", "unsupported"]
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "tables": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["table_name", "rows"],
+        "properties": {
+          "table_name": {"type": "string"},
+          "rows": {"type": "array", "items": {"type": "object"}}
+        },
+        "additionalProperties": false
+      }
+    },
+    "expected_validation_failures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["field", "rule"],
+        "properties": {
+          "field": {"type": "string"},
+          "rule": {"type": "string"},
+          "reason_contains": {"type": ["string", "null"]}
+        },
+        "additionalProperties": false
+      }
+    },
+    "notes": {"type": ["string", "null"]}
+  },
+  "additionalProperties": false
+}
