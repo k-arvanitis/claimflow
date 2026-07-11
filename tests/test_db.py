@@ -54,3 +54,20 @@ def test_create_document_and_extraction_run():
     assert len(failures) == 1
     assert failures[0].rule == "icd10_lookup"
     session.close()
+
+
+def test_create_policy_evidence_and_decision():
+    session = _make_session()
+    pkg = db.create_package(session, str(uuid.uuid4()))
+
+    evidence = db.create_policy_evidence(session, pkg.id, [
+        {"question": "Is diagnosis code XXXXX billable?", "answer": "No, it is not a recognized code.",
+         "citations": ["policy excerpt [1]"]},
+    ])
+    assert len(evidence) == 1
+    assert json.loads(evidence[0].citations_json) == ["policy excerpt [1]"]
+
+    decision = db.create_decision(session, pkg.id, "flagged", ["diagnosis_codes: not a recognized code"])
+    assert decision.decision == "flagged"
+    assert json.loads(decision.review_reasons_json) == ["diagnosis_codes: not a recognized code"]
+    session.close()

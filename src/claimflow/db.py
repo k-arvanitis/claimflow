@@ -222,3 +222,23 @@ def create_validation_failures(
     session.add_all(rows)
     session.commit()
     return rows
+
+
+def create_policy_evidence(session: Session, package_id: str, answers: list[dict]) -> list[PolicyEvidence]:
+    rows = [
+        PolicyEvidence(
+            package_id=package_id, question=a["question"], answer=a["answer"],
+            citations_json=json.dumps(a["citations"]),
+        )
+        for a in answers
+    ]
+    session.add_all(rows)
+    session.commit()
+    return rows
+
+
+def create_decision(session: Session, package_id: str, decision: str, review_reasons: list[str]) -> Decision:
+    row = Decision(package_id=package_id, decision=decision, review_reasons_json=json.dumps(review_reasons))
+    session.add(row)
+    session.commit()
+    return row
