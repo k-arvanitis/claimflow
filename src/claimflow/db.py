@@ -242,3 +242,65 @@ def create_decision(session: Session, package_id: str, decision: str, review_rea
     session.add(row)
     session.commit()
     return row
+
+
+def record_review_action(
+    session: Session,
+    extraction_run_id: str,
+    field_name: str,
+    action: str,
+    *,
+    original_value=None,
+    corrected_value=None,
+    validation_before: list | None = None,
+    validation_after: list | None = None,
+    reviewer: str = "reviewer",
+    note: str | None = None,
+) -> ReviewAction:
+    row = ReviewAction(
+        extraction_run_id=extraction_run_id,
+        field_name=field_name,
+        action=action,
+        original_value_json=json.dumps(original_value) if original_value is not None else None,
+        corrected_value_json=json.dumps(corrected_value) if corrected_value is not None else None,
+        validation_before_json=json.dumps(validation_before) if validation_before is not None else None,
+        validation_after_json=json.dumps(validation_after) if validation_after is not None else None,
+        reviewer=reviewer,
+        note=note,
+    )
+    session.add(row)
+    session.commit()
+    return row
+
+
+def persist_extraction_result(session: Session, package_id: str, result: dict) -> None:
+    """Fan a ClaimState-shaped result dict out into normalized rows.
+
+    Additive alongside `update_package_status`'s `result_json` blob — this does not
+    replace the existing GET /claims/{id} contract, it makes the same data queryable.
+    """
+    documents = result.get("documents") or []
+    if not documents:
+        return
+
+    domain = result.get("domain")
+    doc_rows = [create_document(session, package_id, doc) for doc in documents]
+
+    claim_doc_row = next((d for d, src in zip(doc_rows, documents) if src["doc_type"] == domain), None)
+    if claim_doc_row is None:
+        return
+
+    run = create_extraction_run(
+        session, claim_doc_row.id, domain or "unknown",
+        result.get("extraction_status") or "error",
+        result.get("extraction_overall_confidence") or 0.0,
+    )
+
+    if result.get("extraction_fields"):
+        create_extracted_fields(session, run.id, result["extraction_fields"])
+    if result.get("validation_failures"):
+        create_validation_failures(session, run.id, result["validation_failures"])
+    if result.get("policy_answers"):
+        create_policy_evidence(session, package_id, result["policy_answers"])
+    if result.get("decision"):
+        create_decision(session, package_id, result["decision"], result.get("review_reasons") or [])
