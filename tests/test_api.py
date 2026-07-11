@@ -340,7 +340,8 @@ def test_submit_field_review():
 
     session = db.SessionLocal()
     try:
-        assert session.query(db.ReviewAction).filter_by(field_name="diagnosis_codes").count() == 1
+        run = session.get(db.ExtractedField, field_id).extraction_run_id
+        assert session.query(db.ReviewAction).filter_by(extraction_run_id=run, field_name="diagnosis_codes").count() == 1
     finally:
         session.close()
 
