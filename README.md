@@ -8,7 +8,7 @@ Unlike a plain "PDF to JSON" extractor, ClaimFlow is built for workflows where e
 
 Supports three claim domains out of the box: **CMS-1500 health**, **Xactimate property damage**, and **SBA loan applications**.
 
-**Supported inputs:** born-digital PDFs, scanned/image-only PDFs (OCR fallback via tesseract), standalone images (PNG/JPG/WEBP/TIFF/BMP), DOCX (converted to PDF via LibreOffice so it goes through the same page-based pipeline as everything else), and multi-document packages mixing any of these.
+**Supported inputs:** born-digital PDFs, scanned/image-only PDFs (OCR fallback via [doc-intel](../doc-intel), tesseract by default), standalone images (PNG/JPG/WEBP/TIFF/BMP), DOCX (converted to PDF via LibreOffice so it goes through the same page-based pipeline as everything else), and multi-document packages mixing any of these.
 
 ![Architecture](assets/architecture.svg)
 
@@ -28,7 +28,7 @@ It is not a production HIPAA/compliance system as-is.
 
 | Node | Type | What it does |
 |------|------|--------------|
-| Ingest | Deterministic | Reads PDFs, images, and DOCX from the package directory; OCR fallback via tesseract; classifies every document by type |
+| Ingest | Deterministic | Reads PDFs, images, and DOCX from the package directory; text-layer detection and OCR fallback via [doc-intel](../doc-intel)'s `build_artifact()`; classifies every document by type |
 | Extract | LLM | Structured field extraction via [doc-intel](../doc-intel); confidence + source evidence per field |
 | Validate | Deterministic | Domain-specific rule checks (arithmetic, lookup tables, date windows) |
 | Retrieve | Hybrid / LLM-assisted | Qdrant vector search + cross-encoder rerank (deterministic) + LLM synthesis (generative) for each failing rule |
@@ -80,7 +80,7 @@ Every extracted field carries where it came from, not just its value:
 Scanned pages don't get a black-box "trust the model" treatment:
 
 - **Side-by-side page viewer** — the review UI renders the original page image next to its extracted text (native text layer, or on-demand OCR for scanned pages), with page navigation and a "jump to this field's evidence" shortcut.
-- **Low-quality scan detection** — a density heuristic (extracted characters vs. a normal text page) flags likely-failed scans. It is not a real per-word OCR confidence score — PyMuPDF's tesseract wrapper doesn't expose one — so it's surfaced as a detection signal, not a confidence metric.
+- **Low-quality scan detection** — a density heuristic (extracted characters vs. a normal text page) flags likely-failed scans. It is not a real per-word OCR confidence score — doc-intel's OCR backends don't expose one — so it's surfaced as a detection signal, not a confidence metric.
 - **OCR fallback log** — every page that triggers OCR (no text layer) is logged, with a distinct low-quality-scan warning when OCR yields very little text.
 
 ## Human review queue
@@ -307,7 +307,7 @@ Every downloaded artifact is tracked in `eval/real_public/manifest.json` — sou
 - **No production HIPAA compliance.** No PHI-specific access control, audit logging, encryption at rest, or retention policy — don't point this at real patient/claimant data as-is.
 - **No production auth/RBAC.** The API and Streamlit UI have no authentication — anyone who can reach the port can submit and review claims.
 - **MedCaseFlow is not implemented.** Medical/legal case-file intelligence (timeline reconstruction, contradiction detection, missing-evidence detection) is a separate, not-yet-built idea.
-- **Scan quality is a heuristic, not real OCR confidence** — a character-density proxy; PyMuPDF's tesseract wrapper doesn't expose true per-word confidence (see [OCR proof](#ocr-proof)).
+- **Scan quality is a heuristic, not real OCR confidence** — a character-density proxy computed by ClaimFlow over the text doc-intel returns; doc-intel's OCR backends don't expose true per-word confidence (see [OCR proof](#ocr-proof)).
 - **Nested/list field row confidence and evidence are inherited from the parent field, not computed per row.** `diagnosis_codes`, `service_lines`, and `line_items` are individually reviewable (add/edit/delete rows, exported with action/original/final value) — see [Human review queue](#human-review-queue) — but doc-intel scores a list field as one whole, so every row in the export shares the same confidence/evidence rather than having its own.
 - **Field accuracy is exact-match**, normalized for dates/currency but not names/addresses — minor OCR spelling variance counts as wrong even if a human reviewer would accept it.
 - **Blank-field hallucination risk.** A model can fabricate a value for a blank field even when the schema allows null and the prompt says not to guess. Deterministic pattern checks catch this for `tax_id`, `applicant_name`, `billing_provider_npi`, and `claim_number` — generalizable, real-world rules, not synthetic-data hacks. `insurance_id` is mitigated by making the field nullable. `signature_on_file` remains unresolved — it's fundamentally a visual question, and needs vision-based verification, not another prompt tweak.
