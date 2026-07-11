@@ -10,7 +10,6 @@ import streamlit as st
 
 from claimflow import db
 from claimflow.graph import build_graph
-from claimflow.nodes.ingest import ocr_page
 from claimflow.review import diff_list_field as _diff_list_field
 from claimflow.review import rerun_validation as _rerun_validation
 from claimflow.tracing import get_callback
@@ -49,6 +48,19 @@ def _render_page(pdf_path: str, page_no: int, bbox: list[float] | None) -> bytes
         return None
 
 
+def _ocr_page(doc: fitz.Document, page_index: int) -> str:
+    """Run tesseract OCR on one page via fitz's built-in OCR, for on-demand page display only —
+    the ingest pipeline itself delegates OCR to doc-intel's build_artifact()."""
+    if page_index >= len(doc):
+        return ""
+    try:
+        page = doc[page_index]
+        tp = page.get_textpage_ocr(dpi=300, full=False)
+        return page.get_text(textpage=tp)
+    except Exception:
+        return ""
+
+
 def _page_text(pdf_path: str, page_no: int) -> str:
     """Text for one page — native text layer if present, else on-demand OCR (same fallback ingest uses)."""
     try:
@@ -57,7 +69,7 @@ def _page_text(pdf_path: str, page_no: int) -> str:
         text = page.get_text()
         if len(text.strip()) >= 50:
             return text
-        return ocr_page(doc, page_no - 1) or "(no text recovered from this page)"
+        return _ocr_page(doc, page_no - 1) or "(no text recovered from this page)"
     except Exception:
         return "(could not read page)"
 
