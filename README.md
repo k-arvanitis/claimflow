@@ -203,14 +203,43 @@ make ui
 
 ## API
 
+### Packages
 ```
-POST /claims       Upload one or more files; returns decision, classified documents, extracted fields with source evidence, validation failures, and OCR log
-GET  /health       Liveness check
+POST   /packages                         Upload one or more files, returns {package_id, status}; processing runs in the background
+GET    /packages                        List all packages (id, status, created_at)
+GET    /packages/{package_id}            Full package detail (status, decision, extracted fields, validation failures, error)
+DELETE /packages/{package_id}            Delete a package (cascades to its documents/fields/failures/evidence/decisions; keeps its audit trail)
+POST   /packages/{package_id}/process    (Re)trigger processing on an existing package
+GET    /packages/{package_id}/status     Lightweight status poll (package_id, status only)
+```
+
+### Documents and evidence
+```
+GET /packages/{package_id}/documents                                     List documents in a package
+GET /packages/{package_id}/documents/{document_id}                        One document's detail
+GET /packages/{package_id}/documents/{document_id}/pages/{page}           PNG render of one page (optional ?bbox=x0,y0,x1,y1 to highlight evidence)
+GET /packages/{package_id}/fields/{field_id}/evidence                     Source evidence for one extracted field
+```
+
+### Review
+```
+GET  /reviews/queue                                    Packages currently flagged or escalated, across the whole system
+GET  /packages/{package_id}/review                     Fields + validation failures for one package's review
+POST /packages/{package_id}/fields/{field_id}/review    Submit a reviewer action (approve/edit/reject) for one field
+POST /packages/{package_id}/validation/re-run           Re-run the domain's real validator against corrected field values
+POST /packages/{package_id}/decision                    Record a final decision (approved/flagged/escalated)
+```
+
+### Policy support and audit
+```
+GET /packages/{package_id}/policy-evidence    Cited policy answers for the package's failed validation rules
+GET /packages/{package_id}/audit               Audit log (upload, extract, validate, review_edit, decision events)
+GET /packages/{package_id}/export               Full package export (decision, fields, failures, policy answers)
 ```
 
 Example:
 ```bash
-curl -X POST http://localhost:8010/claims \
+curl -X POST http://localhost:8010/packages \
   -F "files=@data/synthetic/health/package_001/claim.pdf"
 ```
 
