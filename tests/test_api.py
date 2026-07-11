@@ -420,3 +420,49 @@ def test_submit_decision():
         assert latest.decision == "approved"
     finally:
         session.close()
+
+
+def test_policy_evidence_and_audit_endpoints():
+    from api.main import app
+
+    mock_graph = MagicMock()
+    mock_graph.invoke.return_value = {
+        "domain": "cms1500",
+        "documents": [{"path": "/tmp/claim.pdf", "doc_type": "cms1500", "has_text_layer": True, "scan_quality": None}],
+        "extraction_fields": [], "extraction_status": "review", "extraction_overall_confidence": 0.5,
+        "validation_failures": [{"field": "diagnosis_codes", "rule": "icd10_lookup", "reason": "bad code"}],
+        "policy_answers": [{"question": "Is XXXXX billable?", "answer": "No.", "citations": ["policy excerpt [1]"]}],
+        "decision": "flagged", "review_reasons": ["bad code"], "error": None,
+    }
+    with patch("api.main.build_graph", return_value=mock_graph):
+        with TestClient(app) as client:
+            pdf_bytes = _make_pdf_bytes()
+            response = client.post(
+                "/packages",
+                files=[("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))],
+            )
+            package_id = response.json()["package_id"]
+
+            evidence_response = client.get(f"/packages/{package_id}/policy-evidence")
+            audit_response = client.get(f"/packages/{package_id}/audit")
+            export_response = client.get(f"/packages/{package_id}/export")
+
+    assert evidence_response.status_code == 200
+    assert len(evidence_response.json()) == 1
+    assert evidence_response.json()[0]["question"] == "Is XXXXX billable?"
+
+    assert audit_response.status_code == 200
+    audit_actions = {entry["action"] for entry in audit_response.json()}
+    assert "upload" in audit_actions
+
+    assert export_response.status_code == 200
+    export_body = export_response.json()
+    assert export_body["package_id"] == package_id
+    assert export_body["decision"] == "flagged"
+
+
+def test_export_404_for_unknown_package():
+    from api.main import app
+    with TestClient(app) as client:
+        response = client.get("/packages/does-not-exist/export")
+    assert response.status_code == 404

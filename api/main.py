@@ -345,3 +345,54 @@ async def submit_package_decision(package_id: str, body: dict):
         return {"package_id": package_id, "decision": decision.decision}
     finally:
         session.close()
+
+
+@app.get("/packages/{package_id}/policy-evidence")
+async def get_policy_evidence(package_id: str):
+    session = db.SessionLocal()
+    try:
+        return [
+            {
+                "question": pe.question, "answer": pe.answer,
+                "citations": json.loads(pe.citations_json),
+            }
+            for pe in db.list_policy_evidence_for_package(session, package_id)
+        ]
+    finally:
+        session.close()
+
+
+@app.get("/packages/{package_id}/audit")
+async def get_audit_trail(package_id: str):
+    session = db.SessionLocal()
+    try:
+        return [
+            {
+                "actor": entry.actor, "action": entry.action, "timestamp": entry.timestamp.isoformat(),
+                "detail": json.loads(entry.detail_json) if entry.detail_json else None,
+            }
+            for entry in db.list_audit_events_for_package(session, package_id)
+        ]
+    finally:
+        session.close()
+
+
+@app.get("/packages/{package_id}/export")
+async def export_package(package_id: str):
+    session = db.SessionLocal()
+    try:
+        pkg = db.get_package(session, package_id)
+        if pkg is None:
+            raise HTTPException(status_code=404, detail="Package not found")
+        result = json.loads(pkg.result_json) if pkg.result_json else {}
+        return {
+            "package_id": package_id,
+            "status": pkg.status,
+            "decision": result.get("decision"),
+            "domain": result.get("domain"),
+            "extraction_fields": result.get("extraction_fields", []),
+            "validation_failures": result.get("validation_failures", []),
+            "policy_answers": result.get("policy_answers", []),
+        }
+    finally:
+        session.close()
