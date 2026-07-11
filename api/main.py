@@ -183,6 +183,7 @@ async def list_package_documents(package_id: str):
             {
                 "document_id": doc.id, "path": doc.path, "doc_type": doc.doc_type,
                 "has_text_layer": doc.has_text_layer, "scan_quality": doc.scan_quality,
+                "classification_reason": doc.classification_reason, "manually_overridden": doc.manually_overridden,
             }
             for doc in db.list_documents(session, package_id)
         ]
@@ -200,6 +201,7 @@ async def get_package_document(package_id: str, document_id: str):
         return {
             "document_id": doc.id, "path": doc.path, "doc_type": doc.doc_type,
             "has_text_layer": doc.has_text_layer, "scan_quality": doc.scan_quality,
+            "classification_reason": doc.classification_reason, "manually_overridden": doc.manually_overridden,
         }
     finally:
         session.close()

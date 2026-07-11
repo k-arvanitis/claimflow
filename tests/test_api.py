@@ -555,3 +555,29 @@ def test_reprocess_passes_overrides_to_graph():
     assert mock_graph.invoke.call_count == 2
     second_call_state = mock_graph.invoke.call_args_list[1][0][0]
     assert second_call_state["doc_type_overrides"] == {"claim.pdf": "cms1500"}
+
+
+def test_list_documents_includes_classification_metadata():
+    from api.main import app
+
+    mock_graph = MagicMock()
+    mock_graph.invoke.return_value = {
+        "domain": "cms1500",
+        "documents": [{"path": "/tmp/claim.pdf", "doc_type": "cms1500", "has_text_layer": True,
+                        "scan_quality": None, "classification_reason": "matched domain keyword 'cms-1500' for cms1500"}],
+        "extraction_fields": [], "extraction_status": "pass", "extraction_overall_confidence": 0.9,
+        "validation_failures": [], "policy_answers": [], "decision": "approved", "review_reasons": [], "error": None,
+    }
+    with patch("api.main.build_graph", return_value=mock_graph):
+        with TestClient(app) as client:
+            pdf_bytes = _make_pdf_bytes()
+            response = client.post(
+                "/packages",
+                files=[("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))],
+            )
+            package_id = response.json()["package_id"]
+
+            docs = client.get(f"/packages/{package_id}/documents").json()
+
+    assert docs[0]["classification_reason"] == "matched domain keyword 'cms-1500' for cms1500"
+    assert docs[0]["manually_overridden"] is False

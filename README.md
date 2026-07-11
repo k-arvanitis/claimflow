@@ -53,6 +53,8 @@ Every document in a package is classified, not just the primary claim form — a
 
 Anything that matches no known pattern is labeled `unknown` rather than silently dropped, so it's still visible for manual triage.
 
+Classification is deterministic keyword matching, so every result carries a **reason** (which keyword matched, and for which type) — surfaced via `GET /packages/{package_id}/documents`. A reviewer can override a misclassified document with `POST /packages/{package_id}/documents/{document_id}/reclassify`, then `POST /packages/{package_id}/process` to reprocess it — the new type's schema and validators run on the next pass, and the package's detected domain is re-derived from the overridden classification.
+
 ## Source evidence
 
 Every extracted field carries where it came from, not just its value:
@@ -215,10 +217,11 @@ GET    /packages/{package_id}/status     Lightweight status poll (package_id, st
 
 ### Documents and evidence
 ```
-GET /packages/{package_id}/documents                                     List documents in a package
-GET /packages/{package_id}/documents/{document_id}                        One document's detail
-GET /packages/{package_id}/documents/{document_id}/pages/{page}           PNG render of one page (optional ?bbox=x0,y0,x1,y1 to highlight evidence)
-GET /packages/{package_id}/fields/{field_id}/evidence                     Source evidence for one extracted field
+GET  /packages/{package_id}/documents                                     List documents in a package (includes doc_type, classification_reason, manually_overridden)
+GET  /packages/{package_id}/documents/{document_id}                        One document's detail
+GET  /packages/{package_id}/documents/{document_id}/pages/{page}           PNG render of one page (optional ?bbox=x0,y0,x1,y1 to highlight evidence)
+POST /packages/{package_id}/documents/{document_id}/reclassify              Override a document's classified type; call POST .../process afterward to reprocess with it
+GET  /packages/{package_id}/fields/{field_id}/evidence                     Source evidence for one extracted field
 ```
 
 ### Review
