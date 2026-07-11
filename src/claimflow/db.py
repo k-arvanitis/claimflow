@@ -3,6 +3,7 @@ NOT encrypted at rest — see TODO.md."""
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -161,3 +162,63 @@ def log_audit(session: Session, package_id: str, actor: str, action: str, detail
         detail_json=json.dumps(detail) if detail is not None else None,
     ))
     session.commit()
+
+
+def create_document(session: Session, package_id: str, doc: dict) -> Document:
+    row = Document(
+        id=str(uuid.uuid4()),
+        package_id=package_id,
+        path=doc["path"],
+        doc_type=doc["doc_type"],
+        has_text_layer=doc["has_text_layer"],
+        scan_quality=doc.get("scan_quality"),
+    )
+    session.add(row)
+    session.commit()
+    return row
+
+
+def create_extraction_run(
+    session: Session, document_id: str, schema_name: str, status: str, overall_confidence: float
+) -> ExtractionRun:
+    row = ExtractionRun(
+        id=str(uuid.uuid4()),
+        document_id=document_id,
+        schema_name=schema_name,
+        status=status,
+        overall_confidence=overall_confidence,
+    )
+    session.add(row)
+    session.commit()
+    return row
+
+
+def create_extracted_fields(session: Session, extraction_run_id: str, fields: list[dict]) -> list[ExtractedField]:
+    rows = [
+        ExtractedField(
+            extraction_run_id=extraction_run_id,
+            name=f["name"],
+            value_json=json.dumps(f["value"]),
+            confidence=f["confidence"],
+            grounded=f["grounded"],
+            valid=f["valid"],
+            field_status=f["field_status"],
+            evidence_json=json.dumps(f["evidence"]) if f.get("evidence") is not None else None,
+        )
+        for f in fields
+    ]
+    session.add_all(rows)
+    session.commit()
+    return rows
+
+
+def create_validation_failures(
+    session: Session, extraction_run_id: str, failures: list[dict]
+) -> list[ValidationFailure]:
+    rows = [
+        ValidationFailure(extraction_run_id=extraction_run_id, field=f["field"], rule=f["rule"], reason=f["reason"])
+        for f in failures
+    ]
+    session.add_all(rows)
+    session.commit()
+    return rows
