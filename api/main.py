@@ -139,3 +139,30 @@ async def delete_package(package_id: str):
     pkg_dir = Path(settings.storage_dir) / package_id
     shutil.rmtree(pkg_dir, ignore_errors=True)
     return {"package_id": package_id, "status": "deleted"}
+
+
+@app.post("/packages/{package_id}/process")
+async def process_package(package_id: str, background_tasks: BackgroundTasks):
+    session = db.SessionLocal()
+    try:
+        pkg = db.get_package(session, package_id)
+        if pkg is None:
+            raise HTTPException(status_code=404, detail="Package not found")
+    finally:
+        session.close()
+
+    pkg_dir = Path(settings.storage_dir) / package_id
+    background_tasks.add_task(_run_claim, app.state.graph, package_id, pkg_dir)
+    return {"package_id": package_id, "status": "queued"}
+
+
+@app.get("/packages/{package_id}/status")
+async def get_package_status(package_id: str):
+    session = db.SessionLocal()
+    try:
+        pkg = db.get_package(session, package_id)
+        if pkg is None:
+            raise HTTPException(status_code=404, detail="Package not found")
+        return {"package_id": pkg.id, "status": pkg.status}
+    finally:
+        session.close()

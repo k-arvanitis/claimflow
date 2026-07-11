@@ -129,3 +129,60 @@ def test_delete_package():
         assert db.get_package(session, package_id) is None
     finally:
         session.close()
+
+
+def test_reprocess_package():
+    from api.main import app
+
+    mock_graph = MagicMock()
+    mock_graph.invoke.return_value = {
+        "domain": None, "documents": [], "extraction_fields": [], "extraction_status": None,
+        "extraction_overall_confidence": None, "validation_failures": [], "policy_answers": [],
+        "decision": None, "review_reasons": [], "error": None,
+    }
+    with patch("api.main.build_graph", return_value=mock_graph):
+        with TestClient(app) as client:
+            pdf_bytes = _make_pdf_bytes()
+            response = client.post(
+                "/packages",
+                files=[("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))],
+            )
+            package_id = response.json()["package_id"]
+
+            reprocess_response = client.post(f"/packages/{package_id}/process")
+            assert reprocess_response.status_code == 200
+            assert reprocess_response.json()["status"] == "queued"
+
+    assert mock_graph.invoke.call_count == 2
+
+
+def test_reprocess_unknown_package_404():
+    from api.main import app
+    with TestClient(app) as client:
+        response = client.post("/packages/does-not-exist/process")
+    assert response.status_code == 404
+
+
+def test_package_status():
+    from api.main import app
+
+    mock_graph = MagicMock()
+    mock_graph.invoke.return_value = {
+        "domain": None, "documents": [], "extraction_fields": [], "extraction_status": None,
+        "extraction_overall_confidence": None, "validation_failures": [], "policy_answers": [],
+        "decision": None, "review_reasons": [], "error": None,
+    }
+    with patch("api.main.build_graph", return_value=mock_graph):
+        with TestClient(app) as client:
+            pdf_bytes = _make_pdf_bytes()
+            response = client.post(
+                "/packages",
+                files=[("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))],
+            )
+            package_id = response.json()["package_id"]
+
+            status_response = client.get(f"/packages/{package_id}/status")
+
+    assert status_response.status_code == 200
+    body = status_response.json()
+    assert body == {"package_id": package_id, "status": "completed"}
