@@ -8,7 +8,7 @@ from pathlib import Path
 from fastapi import BackgroundTasks, FastAPI, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, Response
 
-from claimflow import db
+from claimflow import db, review
 from claimflow.config import settings
 from claimflow.graph import build_graph
 from claimflow.pages import render_page
@@ -56,6 +56,7 @@ def _run_claim(graph, package_id: str, pkg_dir: Path) -> None:
 
         response = {
             "decision": result.get("decision"),
+            "extraction_data": result.get("extraction_data"),
             "domain": result.get("domain"),
             "documents": result.get("documents", []),
             "ocr_log": result.get("ocr_log", []),
@@ -277,5 +278,70 @@ async def get_package_review(package_id: str):
                 {"field": vf.field, "rule": vf.rule, "reason": vf.reason} for vf in failures
             ],
         }
+    finally:
+        session.close()
+
+
+@app.post("/packages/{package_id}/fields/{field_id}/review")
+async def submit_field_review(package_id: str, field_id: int, body: dict):
+    session = db.SessionLocal()
+    try:
+        field = db.get_extracted_field(session, field_id)
+        if field is None:
+            raise HTTPException(status_code=404, detail="Field not found")
+        run = session.get(db.ExtractionRun, field.extraction_run_id)
+        doc = session.get(db.Document, run.document_id) if run else None
+        if doc is None or doc.package_id != package_id:
+            raise HTTPException(status_code=404, detail="Field not found")
+
+        failures_before = db.list_validation_failures_for_run(session, run.id)
+        validation_before = [f.reason for f in failures_before if f.field == field.name]
+
+        action = db.record_review_action(
+            session, run.id, field.name, body["action"],
+            original_value=json.loads(field.value_json) if field.value_json else None,
+            corrected_value=body.get("corrected_value"),
+            validation_before=validation_before,
+            validation_after=body.get("validation_after"),
+            reviewer=body.get("reviewer", "reviewer"),
+            note=body.get("note"),
+        )
+        db.log_audit(session, package_id, action.reviewer, "review_edit", {"field": field.name, "action": action.action})
+        return {
+            "field_id": field_id, "action": action.action, "reviewer": action.reviewer,
+            "corrected_value": json.loads(action.corrected_value_json) if action.corrected_value_json else None,
+        }
+    finally:
+        session.close()
+
+
+@app.post("/packages/{package_id}/validation/re-run")
+async def rerun_package_validation(package_id: str, body: dict):
+    session = db.SessionLocal()
+    try:
+        pkg = db.get_package(session, package_id)
+        if pkg is None:
+            raise HTTPException(status_code=404, detail="Package not found")
+        result = json.loads(pkg.result_json) if pkg.result_json else {}
+    finally:
+        session.close()
+
+    domain = result.get("domain")
+    merged = dict(result.get("extraction_data") or {})
+    merged.update(body.get("corrected_fields") or {})
+    failures = review.rerun_validation(domain, merged)
+    return {"validation_failures": [dict(f) for f in failures]}
+
+
+@app.post("/packages/{package_id}/decision")
+async def submit_package_decision(package_id: str, body: dict):
+    session = db.SessionLocal()
+    try:
+        pkg = db.get_package(session, package_id)
+        if pkg is None:
+            raise HTTPException(status_code=404, detail="Package not found")
+        decision = db.create_decision(session, package_id, body["decision"], body.get("review_reasons") or [])
+        db.log_audit(session, package_id, "reviewer", "decision", {"decision": decision.decision})
+        return {"package_id": package_id, "decision": decision.decision}
     finally:
         session.close()

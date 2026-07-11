@@ -299,3 +299,123 @@ def test_package_review_view():
     assert len(body["fields"]) == 1
     assert body["fields"][0]["name"] == "diagnosis_codes"
     assert len(body["validation_failures"]) == 1
+
+
+def test_submit_field_review():
+    from api.main import app
+    from claimflow import db
+
+    mock_graph = MagicMock()
+    mock_graph.invoke.return_value = {
+        "domain": "cms1500",
+        "documents": [{"path": "/tmp/claim.pdf", "doc_type": "cms1500", "has_text_layer": True, "scan_quality": None}],
+        "extraction_fields": [
+            {"name": "diagnosis_codes", "value": ["XXXXX"], "confidence": 0.5,
+             "grounded": True, "valid": False, "field_status": "found", "evidence": None},
+        ],
+        "extraction_status": "review", "extraction_overall_confidence": 0.5,
+        "validation_failures": [{"field": "diagnosis_codes", "rule": "icd10_lookup", "reason": "bad code"}],
+        "policy_answers": [], "decision": "flagged", "review_reasons": ["bad code"], "error": None,
+    }
+    with patch("api.main.build_graph", return_value=mock_graph):
+        with TestClient(app) as client:
+            pdf_bytes = _make_pdf_bytes()
+            response = client.post(
+                "/packages",
+                files=[("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))],
+            )
+            package_id = response.json()["package_id"]
+
+            review_view = client.get(f"/packages/{package_id}/review").json()
+            field_id = review_view["fields"][0]["field_id"]
+
+            action_response = client.post(
+                f"/packages/{package_id}/fields/{field_id}/review",
+                json={"action": "edit", "corrected_value": ["J06.9"], "reviewer": "jane", "note": "fixed typo"},
+            )
+
+    assert action_response.status_code == 200
+    body = action_response.json()
+    assert body["action"] == "edit"
+
+    session = db.SessionLocal()
+    try:
+        assert session.query(db.ReviewAction).filter_by(field_name="diagnosis_codes").count() == 1
+    finally:
+        session.close()
+
+
+def test_field_review_404_for_wrong_package():
+    from api.main import app
+    with TestClient(app) as client:
+        response = client.post(
+            "/packages/wrong-package/fields/999999/review",
+            json={"action": "approve"},
+        )
+    assert response.status_code == 404
+
+
+def test_validation_rerun():
+    from api.main import app
+
+    mock_graph = MagicMock()
+    mock_graph.invoke.return_value = {
+        "domain": "cms1500",
+        "documents": [{"path": "/tmp/claim.pdf", "doc_type": "cms1500", "has_text_layer": True, "scan_quality": None}],
+        "extraction_data": {"diagnosis_codes": ["XXXXX"], "total_charge": 100.0},
+        "extraction_fields": [], "extraction_status": "review", "extraction_overall_confidence": 0.5,
+        "validation_failures": [], "policy_answers": [], "decision": "flagged", "review_reasons": [], "error": None,
+    }
+    with patch("api.main.build_graph", return_value=mock_graph), \
+         patch("claimflow.review.rerun_validation", return_value=[]) as mock_rerun:
+        with TestClient(app) as client:
+            pdf_bytes = _make_pdf_bytes()
+            response = client.post(
+                "/packages",
+                files=[("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))],
+            )
+            package_id = response.json()["package_id"]
+
+            rerun_response = client.post(
+                f"/packages/{package_id}/validation/re-run",
+                json={"corrected_fields": {"diagnosis_codes": ["J06.9"]}},
+            )
+
+    assert rerun_response.status_code == 200
+    assert rerun_response.json()["validation_failures"] == []
+    assert mock_rerun.called
+
+
+def test_submit_decision():
+    from api.main import app
+    from claimflow import db
+
+    mock_graph = MagicMock()
+    mock_graph.invoke.return_value = {
+        "domain": None, "documents": [], "extraction_fields": [], "extraction_status": None,
+        "extraction_overall_confidence": None, "validation_failures": [], "policy_answers": [],
+        "decision": None, "review_reasons": [], "error": None,
+    }
+    with patch("api.main.build_graph", return_value=mock_graph):
+        with TestClient(app) as client:
+            pdf_bytes = _make_pdf_bytes()
+            response = client.post(
+                "/packages",
+                files=[("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))],
+            )
+            package_id = response.json()["package_id"]
+
+            decision_response = client.post(
+                f"/packages/{package_id}/decision",
+                json={"decision": "approved", "review_reasons": []},
+            )
+
+    assert decision_response.status_code == 200
+    assert decision_response.json()["decision"] == "approved"
+
+    session = db.SessionLocal()
+    try:
+        latest = db.latest_decision_for_package(session, package_id)
+        assert latest.decision == "approved"
+    finally:
+        session.close()
