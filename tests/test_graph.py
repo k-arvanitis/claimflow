@@ -288,3 +288,46 @@ def test_retrieve_node_skipped_when_no_failures():
     }
     result = retrieve_node(state)
     assert result["policy_answers"] == []
+
+
+def test_ingest_node_respects_doc_type_override(tmp_path):
+    """A filename present in doc_type_overrides skips keyword classification entirely."""
+    from unittest.mock import MagicMock, patch
+
+    pkg = tmp_path / "package"
+    pkg.mkdir()
+    claim_pdf = pkg / "claim.pdf"
+    claim_pdf.write_bytes(b"placeholder")
+
+    fake_page = MagicMock()
+    fake_page.text = "completely unrecognizable text with no keywords"
+    fake_page.native_text_available = True
+    fake_page.ocr_used = False
+    fake_artifact = MagicMock()
+    fake_artifact.pages = [fake_page]
+
+    with patch("claimflow.nodes.ingest.build_artifact", return_value=fake_artifact):
+        from claimflow.nodes.ingest import ingest_node
+        from claimflow.state import ClaimState
+
+        state: ClaimState = {
+            "package_dir": str(pkg),
+            "documents": [],
+            "extraction_data": None,
+            "extraction_fields": None,
+            "extraction_status": None,
+            "extraction_overall_confidence": None,
+            "validation_failures": [],
+            "policy_answers": [],
+            "decision": None,
+            "review_reasons": [],
+            "error": None,
+            "doc_type_overrides": {"claim.pdf": "cms1500"},
+        }
+        result = ingest_node(state)
+
+    docs = result["documents"]
+    assert len(docs) == 1
+    assert docs[0]["doc_type"] == "cms1500"
+    assert docs[0]["classification_reason"] == "manual override"
+    assert result["domain"] == "cms1500"

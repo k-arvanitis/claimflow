@@ -63,6 +63,7 @@ def ingest_node(state: ClaimState) -> dict:
         return {"error": f"No supported documents found in {pkg}", "documents": [], "domain": None}
 
     domain_keys = {d.doc_type for d in all_domains()}
+    overrides: dict[str, str] = state.get("doc_type_overrides") or {}
     docs: list[IngestedDoc] = []
     ocr_log: list[str] = []
     detected_domain: str | None = None
@@ -91,7 +92,10 @@ def ingest_node(state: ClaimState) -> dict:
                         "— possible low-quality scan"
                     )
 
-            doc_type, classification_reason = _classify_doc_type(first_page_text)
+            if name in overrides:
+                doc_type, classification_reason = overrides[name], "manual override"
+            else:
+                doc_type, classification_reason = _classify_doc_type(first_page_text)
             if doc_type in domain_keys and detected_domain is None:
                 detected_domain = doc_type
             docs.append(IngestedDoc(

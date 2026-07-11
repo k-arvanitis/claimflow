@@ -25,6 +25,7 @@ class ClaimState(TypedDict):
     # Input
     package_dir: str        # path to folder containing PDFs
     domain: str | None      # detected doc_type, e.g. "cms1500" | "xactimate" | "loan"
+    doc_type_overrides: dict[str, str]   # filename -> forced doc_type, from a reviewer's classification override
 
     # Ingest output
     documents: list[IngestedDoc]
