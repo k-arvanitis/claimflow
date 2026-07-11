@@ -1,4 +1,23 @@
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+
+@pytest.fixture(autouse=True)
+def isolated_db(tmp_path, monkeypatch):
+    """Rebind claimflow.db's engine/SessionLocal to a fresh per-test SQLite file.
+
+    Without this, tests that go through the real API (TestClient -> lifespan ->
+    init_db()) share settings.db_path's real file across the whole test run —
+    row counts bleed between tests and mutate the developer's actual dev DB.
+    Found and worked around 3 times (case-by-case package_id/run_id scoping)
+    before landing this fixture as the actual root-cause fix."""
+    from claimflow import db
+
+    engine = create_engine(f"sqlite:///{tmp_path}/test.db")
+    monkeypatch.setattr(db, "engine", engine)
+    monkeypatch.setattr(db, "SessionLocal", sessionmaker(bind=engine))
+    db.Base.metadata.create_all(engine)
 
 
 @pytest.fixture

@@ -277,7 +277,7 @@ def persist_extraction_result(session: Session, package_id: str, result: dict) -
     """Fan a ClaimState-shaped result dict out into normalized rows.
 
     Additive alongside `update_package_status`'s `result_json` blob — this does not
-    replace the existing GET /claims/{id} contract, it makes the same data queryable.
+    replace the existing GET /packages/{id} contract, it makes the same data queryable.
     """
     documents = result.get("documents") or []
     if not documents:
@@ -335,6 +335,10 @@ def delete_package(session: Session, package_id: str) -> bool:
                 ValidationFailure.extraction_run_id.in_(run_ids)
             ).all():
                 session.delete(failure)
+            for action in session.query(ReviewAction).filter(
+                ReviewAction.extraction_run_id.in_(run_ids)
+            ).all():
+                session.delete(action)
             for run in runs:
                 session.delete(run)
         for doc in documents:

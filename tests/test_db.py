@@ -164,6 +164,7 @@ def test_delete_package_cascades():
         {"question": "q", "answer": "a", "citations": []},
     ])
     db.create_decision(session, pkg.id, "flagged", ["bad code"])
+    db.record_review_action(session, run.id, "patient_name", "approve")
 
     deleted = db.delete_package(session, pkg.id)
     assert deleted is True
@@ -174,6 +175,7 @@ def test_delete_package_cascades():
     assert session.query(db.ValidationFailure).filter_by(extraction_run_id=run.id).count() == 0
     assert session.query(db.PolicyEvidence).filter_by(package_id=pkg.id).count() == 0
     assert session.query(db.Decision).filter_by(package_id=pkg.id).count() == 0
+    assert session.query(db.ReviewAction).filter_by(extraction_run_id=run.id).count() == 0
     assert db.delete_package(session, "does-not-exist") is False
     session.close()
 
