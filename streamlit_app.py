@@ -10,6 +10,7 @@ import streamlit as st
 
 from claimflow import db
 from claimflow.graph import build_graph
+from claimflow.pages import render_page as _render_page_impl
 from claimflow.review import diff_list_field as _diff_list_field
 from claimflow.review import rerun_validation as _rerun_validation
 from claimflow.tracing import get_callback
@@ -36,16 +37,7 @@ def _run(pkg_dir: str) -> dict:
 
 
 def _render_page(pdf_path: str, page_no: int, bbox: list[float] | None) -> bytes | None:
-    """Render a PDF page as PNG bytes, drawing a red box around the evidence if bbox is known."""
-    try:
-        doc = fitz.open(pdf_path)
-        page = doc[page_no - 1]
-        if bbox:
-            page.draw_rect(fitz.Rect(bbox), color=(1, 0, 0), width=2)
-        pix = page.get_pixmap(dpi=150)
-        return pix.tobytes("png")
-    except Exception:
-        return None
+    return _render_page_impl(pdf_path, page_no, bbox)
 
 
 def _ocr_page(doc: fitz.Document, page_index: int) -> str:

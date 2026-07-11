@@ -6,11 +6,12 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from claimflow import db
 from claimflow.config import settings
 from claimflow.graph import build_graph
+from claimflow.pages import render_page
 from claimflow.tracing import get_callback
 
 logger = logging.getLogger(__name__)
@@ -164,5 +165,74 @@ async def get_package_status(package_id: str):
         if pkg is None:
             raise HTTPException(status_code=404, detail="Package not found")
         return {"package_id": pkg.id, "status": pkg.status}
+    finally:
+        session.close()
+
+
+@app.get("/packages/{package_id}/documents")
+async def list_package_documents(package_id: str):
+    session = db.SessionLocal()
+    try:
+        return [
+            {
+                "document_id": doc.id, "path": doc.path, "doc_type": doc.doc_type,
+                "has_text_layer": doc.has_text_layer, "scan_quality": doc.scan_quality,
+            }
+            for doc in db.list_documents(session, package_id)
+        ]
+    finally:
+        session.close()
+
+
+@app.get("/packages/{package_id}/documents/{document_id}")
+async def get_package_document(package_id: str, document_id: str):
+    session = db.SessionLocal()
+    try:
+        doc = db.get_document(session, document_id)
+        if doc is None or doc.package_id != package_id:
+            raise HTTPException(status_code=404, detail="Document not found")
+        return {
+            "document_id": doc.id, "path": doc.path, "doc_type": doc.doc_type,
+            "has_text_layer": doc.has_text_layer, "scan_quality": doc.scan_quality,
+        }
+    finally:
+        session.close()
+
+
+@app.get("/packages/{package_id}/documents/{document_id}/pages/{page}")
+async def get_document_page_image(package_id: str, document_id: str, page: int, bbox: str | None = None):
+    session = db.SessionLocal()
+    try:
+        doc = db.get_document(session, document_id)
+        if doc is None or doc.package_id != package_id:
+            raise HTTPException(status_code=404, detail="Document not found")
+    finally:
+        session.close()
+
+    parsed_bbox = [float(v) for v in bbox.split(",")] if bbox else None
+    image_bytes = render_page(doc.path, page, parsed_bbox)
+    if image_bytes is None:
+        raise HTTPException(status_code=404, detail="Page could not be rendered")
+    return Response(content=image_bytes, media_type="image/png")
+
+
+@app.get("/packages/{package_id}/fields/{field_id}/evidence")
+async def get_field_evidence(package_id: str, field_id: int):
+    session = db.SessionLocal()
+    try:
+        field = db.get_extracted_field(session, field_id)
+        if field is None:
+            raise HTTPException(status_code=404, detail="Field not found")
+        run = session.get(db.ExtractionRun, field.extraction_run_id)
+        doc = session.get(db.Document, run.document_id) if run else None
+        if doc is None or doc.package_id != package_id:
+            raise HTTPException(status_code=404, detail="Field not found")
+        return {
+            "field_id": field.id,
+            "name": field.name,
+            "value": json.loads(field.value_json) if field.value_json else None,
+            "confidence": field.confidence,
+            "evidence": json.loads(field.evidence_json) if field.evidence_json else None,
+        }
     finally:
         session.close()

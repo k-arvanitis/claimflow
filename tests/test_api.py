@@ -186,3 +186,55 @@ def test_package_status():
     assert status_response.status_code == 200
     body = status_response.json()
     assert body == {"package_id": package_id, "status": "completed"}
+
+
+def test_get_documents_for_package():
+    from api.main import app
+    from claimflow import db
+
+    mock_graph = MagicMock()
+    mock_graph.invoke.return_value = {
+        "domain": "cms1500",
+        "documents": [{"path": "/tmp/claim.pdf", "doc_type": "cms1500", "has_text_layer": True, "scan_quality": None}],
+        "extraction_fields": [], "extraction_status": "pass", "extraction_overall_confidence": 0.9,
+        "validation_failures": [], "policy_answers": [], "decision": "approved", "review_reasons": [], "error": None,
+    }
+    with patch("api.main.build_graph", return_value=mock_graph):
+        with TestClient(app) as client:
+            pdf_bytes = _make_pdf_bytes()
+            response = client.post(
+                "/packages",
+                files=[("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))],
+            )
+            package_id = response.json()["package_id"]
+
+            docs_response = client.get(f"/packages/{package_id}/documents")
+            assert docs_response.status_code == 200
+            docs = docs_response.json()
+            assert len(docs) == 1
+            document_id = docs[0]["document_id"]
+
+            doc_response = client.get(f"/packages/{package_id}/documents/{document_id}")
+            assert doc_response.status_code == 200
+            assert doc_response.json()["doc_type"] == "cms1500"
+
+    session = db.SessionLocal()
+    try:
+        run = db.latest_extraction_run_for_package(session, package_id)
+        assert run is not None
+    finally:
+        session.close()
+
+
+def test_get_document_404_wrong_package():
+    from api.main import app
+    with TestClient(app) as client:
+        response = client.get("/packages/some-package/documents/does-not-exist")
+    assert response.status_code == 404
+
+
+def test_get_field_evidence_404_for_unknown_field():
+    from api.main import app
+    with TestClient(app) as client:
+        response = client.get("/packages/some-package/fields/999999/evidence")
+    assert response.status_code == 404
