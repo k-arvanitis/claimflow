@@ -17,7 +17,7 @@ def test_health():
     assert response.json() == {"status": "ok"}
 
 
-def test_post_claims_returns_decision():
+def test_post_packages_returns_decision():
     fake_result = {
         "package_dir": "/tmp/test",
         "domain": "cms1500",
@@ -45,14 +45,14 @@ def test_post_claims_returns_decision():
         with TestClient(app) as client:
             pdf_bytes = _make_pdf_bytes()
             response = client.post(
-                "/claims",
+                "/packages",
                 files=[("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))],
             )
             assert response.status_code == 200
             queued = response.json()
             package_id = queued["package_id"]
 
-            result = client.get(f"/claims/{package_id}")
+            result = client.get(f"/packages/{package_id}")
 
     assert result.status_code == 200
     data = result.json()
@@ -77,5 +77,55 @@ def test_post_claims_returns_decision():
             .count()
             == 1
         )
+    finally:
+        session.close()
+
+
+def test_get_packages_lists_all():
+    from api.main import app
+    with TestClient(app) as client:
+        pdf_bytes = _make_pdf_bytes()
+        with patch("api.main.build_graph", return_value=MagicMock()):
+            response = client.get("/packages")
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)
+
+
+def test_get_package_404_for_unknown_id():
+    from api.main import app
+    with TestClient(app) as client:
+        response = client.get("/packages/does-not-exist")
+    assert response.status_code == 404
+
+
+def test_delete_package():
+    from api.main import app
+    from claimflow import db
+
+    mock_graph = MagicMock()
+    mock_graph.invoke.return_value = {
+        "domain": None, "documents": [], "extraction_fields": [], "extraction_status": None,
+        "extraction_overall_confidence": None, "validation_failures": [], "policy_answers": [],
+        "decision": None, "review_reasons": [], "error": None,
+    }
+    with patch("api.main.build_graph", return_value=mock_graph):
+        from api.main import app
+        with TestClient(app) as client:
+            pdf_bytes = _make_pdf_bytes()
+            response = client.post(
+                "/packages",
+                files=[("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))],
+            )
+            package_id = response.json()["package_id"]
+
+            delete_response = client.delete(f"/packages/{package_id}")
+            assert delete_response.status_code == 200
+
+            get_response = client.get(f"/packages/{package_id}")
+            assert get_response.status_code == 404
+
+    session = db.SessionLocal()
+    try:
+        assert db.get_package(session, package_id) is None
     finally:
         session.close()

@@ -76,8 +76,8 @@ def _run_claim(graph, package_id: str, pkg_dir: Path) -> None:
         session.close()
 
 
-@app.post("/claims")
-async def process_claims(files: list[UploadFile], background_tasks: BackgroundTasks):
+@app.post("/packages")
+async def create_package(files: list[UploadFile], background_tasks: BackgroundTasks):
     package_id = str(uuid.uuid4())
     pkg_dir = Path(settings.storage_dir) / package_id
     pkg_dir.mkdir(parents=True, exist_ok=True)
@@ -97,11 +97,23 @@ async def process_claims(files: list[UploadFile], background_tasks: BackgroundTa
     return {"package_id": package_id, "status": "queued"}
 
 
-@app.get("/claims/{package_id}")
-async def get_claim(package_id: str):
+@app.get("/packages")
+async def list_packages():
     session = db.SessionLocal()
     try:
-        pkg = session.get(db.Package, package_id)
+        return [
+            {"package_id": pkg.id, "status": pkg.status, "created_at": pkg.created_at.isoformat()}
+            for pkg in db.list_packages(session)
+        ]
+    finally:
+        session.close()
+
+
+@app.get("/packages/{package_id}")
+async def get_package(package_id: str):
+    session = db.SessionLocal()
+    try:
+        pkg = db.get_package(session, package_id)
         if pkg is None:
             raise HTTPException(status_code=404, detail="Package not found")
         return {
@@ -112,3 +124,18 @@ async def get_claim(package_id: str):
         }
     finally:
         session.close()
+
+
+@app.delete("/packages/{package_id}")
+async def delete_package(package_id: str):
+    session = db.SessionLocal()
+    try:
+        deleted = db.delete_package(session, package_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Package not found")
+    finally:
+        session.close()
+
+    pkg_dir = Path(settings.storage_dir) / package_id
+    shutil.rmtree(pkg_dir, ignore_errors=True)
+    return {"package_id": package_id, "status": "deleted"}
