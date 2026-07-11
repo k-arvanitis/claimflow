@@ -67,6 +67,8 @@ def _run_claim(graph, package_id: str, pkg_dir: Path) -> None:
         }
         db.log_audit(session, package_id, "api", "validate", {"validation_failures": response["validation_failures"]})
         db.update_package_status(session, package_id, "failed" if response["error"] else "completed", result=response)
+        if not response["error"]:
+            db.persist_extraction_result(session, package_id, result)
     except Exception as exc:
         logger.error("Background claim processing failed: %s", exc, exc_info=True)
         db.update_package_status(session, package_id, "failed", error=str(exc))

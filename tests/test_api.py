@@ -20,9 +20,13 @@ def test_health():
 def test_post_claims_returns_decision():
     fake_result = {
         "package_dir": "/tmp/test",
-        "documents": [{"path": "/tmp/test/claim.pdf", "doc_type": "cms1500", "has_text_layer": True}],
+        "domain": "cms1500",
+        "documents": [{"path": "/tmp/test/claim.pdf", "doc_type": "cms1500", "has_text_layer": True, "scan_quality": None}],
         "extraction_data": {"patient_name": "DOE JOHN"},
-        "extraction_fields": [],
+        "extraction_fields": [
+            {"name": "patient_name", "value": "DOE JOHN", "confidence": 0.95,
+             "grounded": True, "valid": True, "field_status": "found", "evidence": None},
+        ],
         "extraction_status": "pass",
         "extraction_overall_confidence": 0.88,
         "validation_failures": [],
@@ -32,20 +36,46 @@ def test_post_claims_returns_decision():
         "error": None,
     }
 
-    with patch("api.main.build_graph") as mock_build:
-        mock_app = MagicMock()
-        mock_app.invoke.return_value = fake_result
-        mock_build.return_value = mock_app
+    mock_graph = MagicMock()
+    mock_graph.invoke.return_value = fake_result
 
+    with patch("api.main.build_graph", return_value=mock_graph):
         from api.main import app
-        client = TestClient(app)
-        pdf_bytes = _make_pdf_bytes()
-        response = client.post(
-            "/claims",
-            files=[("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))],
-        )
+        from claimflow import db
+        with TestClient(app) as client:
+            pdf_bytes = _make_pdf_bytes()
+            response = client.post(
+                "/claims",
+                files=[("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))],
+            )
+            assert response.status_code == 200
+            queued = response.json()
+            package_id = queued["package_id"]
 
-    assert response.status_code == 200
-    data = response.json()
-    assert data["decision"] == "approved"
-    assert "validation_failures" in data
+            result = client.get(f"/claims/{package_id}")
+
+    assert result.status_code == 200
+    data = result.json()
+    assert data["status"] == "completed"
+    assert data["result"]["decision"] == "approved"
+
+    session = db.SessionLocal()
+    try:
+        assert session.query(db.Document).filter_by(package_id=package_id).count() == 1
+        assert (
+            session.query(db.ExtractionRun)
+            .join(db.Document, db.ExtractionRun.document_id == db.Document.id)
+            .filter(db.Document.package_id == package_id)
+            .count()
+            == 1
+        )
+        assert (
+            session.query(db.ExtractedField)
+            .join(db.ExtractionRun, db.ExtractedField.extraction_run_id == db.ExtractionRun.id)
+            .join(db.Document, db.ExtractionRun.document_id == db.Document.id)
+            .filter(db.Document.package_id == package_id)
+            .count()
+            == 1
+        )
+    finally:
+        session.close()
