@@ -47,6 +47,8 @@ def test_ingest_node_uses_build_artifact(tmp_path):
 
 def test_ingest_node_classifies_cms1500(tmp_path):
     """Ingest node identifies the claim form and supporting docs."""
+    from unittest.mock import MagicMock, patch
+
     pkg = tmp_path / "package"
     pkg.mkdir()
     claim_pdf = pkg / "claim.pdf"
@@ -54,18 +56,19 @@ def test_ingest_node_classifies_cms1500(tmp_path):
     claim_pdf.write_bytes(b"placeholder")
     other_pdf.write_bytes(b"placeholder")
 
-    def mock_open(path):
-        doc = MagicMock()
+    def mock_build_artifact(path):
         page = MagicMock()
+        page.native_text_available = True
+        page.ocr_used = False
         if "claim" in str(path):
-            page.get_text.return_value = "HEALTH INSURANCE CLAIM FORM CMS-1500\nBox 1a: INS123"
+            page.text = "HEALTH INSURANCE CLAIM FORM CMS-1500\nBox 1a: INS123"
         else:
-            page.get_text.return_value = "DISCHARGE SUMMARY\nPatient: John Doe\nDischarge diagnosis and instructions follow below in full detail."
-        doc.__iter__ = lambda s: iter([page])
-        doc.__len__ = lambda s: 1
-        return doc
+            page.text = "DISCHARGE SUMMARY\nPatient: John Doe\nDischarge diagnosis and instructions follow below in full detail."  # noqa: E501
+        artifact = MagicMock()
+        artifact.pages = [page]
+        return artifact
 
-    with patch("claimflow.nodes.ingest.fitz.open", side_effect=mock_open):
+    with patch("claimflow.nodes.ingest.build_artifact", side_effect=mock_build_artifact):
         from claimflow.nodes.ingest import ingest_node
         from claimflow.state import ClaimState
 
@@ -195,13 +198,14 @@ def test_graph_runs_end_to_end(tmp_path):
     claim_pdf = tmp_path / "claim.pdf"
     claim_pdf.write_bytes(b"placeholder")
 
-    def mock_fitz_open(path):
-        doc = MagicMock()
+    def mock_build_artifact(path):
         page = MagicMock()
-        page.get_text.return_value = "HEALTH INSURANCE CLAIM FORM CMS-1500\nBox 1a: INS123"
-        doc.__iter__ = lambda s: iter([page])
-        doc.__len__ = lambda s: 1
-        return doc
+        page.text = "HEALTH INSURANCE CLAIM FORM CMS-1500\nBox 1a: INS123"
+        page.native_text_available = True
+        page.ocr_used = False
+        artifact = MagicMock()
+        artifact.pages = [page]
+        return artifact
 
     fake_extraction = MagicMock()
     fake_extraction.data = {
@@ -215,7 +219,7 @@ def test_graph_runs_end_to_end(tmp_path):
     fake_extraction.overall_confidence = 0.88
     fake_extraction.status = "pass"
 
-    with patch("claimflow.nodes.ingest.fitz.open", side_effect=mock_fitz_open), \
+    with patch("claimflow.nodes.ingest.build_artifact", side_effect=mock_build_artifact), \
          patch("claimflow.nodes.extract.extract", return_value=fake_extraction), \
          patch("claimflow.lookups.icd10.is_valid_icd10", return_value=True), \
          patch("claimflow.lookups.cpt.is_valid_cpt", return_value=True):
