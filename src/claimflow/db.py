@@ -47,6 +47,8 @@ class Document(Base):
     doc_type: Mapped[str] = mapped_column(String)
     has_text_layer: Mapped[bool] = mapped_column(Boolean)
     scan_quality: Mapped[float | None] = mapped_column(Float, default=None)
+    classification_reason: Mapped[str | None] = mapped_column(Text, default=None)
+    manually_overridden: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
@@ -172,6 +174,8 @@ def create_document(session: Session, package_id: str, doc: dict) -> Document:
         doc_type=doc["doc_type"],
         has_text_layer=doc["has_text_layer"],
         scan_quality=doc.get("scan_quality"),
+        classification_reason=doc.get("classification_reason"),
+        manually_overridden=doc.get("manually_overridden", False),
     )
     session.add(row)
     session.commit()

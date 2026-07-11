@@ -40,14 +40,14 @@ def health():
     return {"status": "ok"}
 
 
-def _run_claim(graph, package_id: str, pkg_dir: Path) -> None:
+def _run_claim(graph, package_id: str, pkg_dir: Path, doc_type_overrides: dict[str, str] | None = None) -> None:
     session = db.SessionLocal()
     try:
         db.update_package_status(session, package_id, "processing")
         db.log_audit(session, package_id, "api", "extract")
 
         thread_id = str(uuid.uuid4())
-        state = {"package_dir": str(pkg_dir), "domain": None}
+        state = {"package_dir": str(pkg_dir), "domain": None, "doc_type_overrides": doc_type_overrides or {}}
         config = {
             "callbacks": get_callback(),
             "configurable": {"thread_id": thread_id},
@@ -150,11 +150,16 @@ async def process_package(package_id: str, background_tasks: BackgroundTasks):
         pkg = db.get_package(session, package_id)
         if pkg is None:
             raise HTTPException(status_code=404, detail="Package not found")
+        overrides = {
+            Path(doc.path).name: doc.doc_type
+            for doc in db.list_documents(session, package_id)
+            if doc.manually_overridden
+        }
     finally:
         session.close()
 
     pkg_dir = Path(settings.storage_dir) / package_id
-    background_tasks.add_task(_run_claim, app.state.graph, package_id, pkg_dir)
+    background_tasks.add_task(_run_claim, app.state.graph, package_id, pkg_dir, overrides)
     return {"package_id": package_id, "status": "queued"}
 
 
@@ -195,6 +200,31 @@ async def get_package_document(package_id: str, document_id: str):
         return {
             "document_id": doc.id, "path": doc.path, "doc_type": doc.doc_type,
             "has_text_layer": doc.has_text_layer, "scan_quality": doc.scan_quality,
+        }
+    finally:
+        session.close()
+
+
+@app.post("/packages/{package_id}/documents/{document_id}/reclassify")
+async def reclassify_document(package_id: str, document_id: str, body: dict):
+    session = db.SessionLocal()
+    try:
+        doc = db.get_document(session, document_id)
+        if doc is None or doc.package_id != package_id:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        doc.doc_type = body["doc_type"]
+        doc.classification_reason = "manual override"
+        doc.manually_overridden = True
+        session.commit()
+
+        db.log_audit(
+            session, package_id, body.get("reviewer", "reviewer"), "reclassify",
+            {"document_id": document_id, "doc_type": doc.doc_type},
+        )
+        return {
+            "document_id": doc.id, "doc_type": doc.doc_type,
+            "classification_reason": doc.classification_reason, "manually_overridden": doc.manually_overridden,
         }
     finally:
         session.close()

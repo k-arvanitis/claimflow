@@ -466,3 +466,92 @@ def test_export_404_for_unknown_package():
     with TestClient(app) as client:
         response = client.get("/packages/does-not-exist/export")
     assert response.status_code == 404
+
+
+def test_reclassify_document():
+    from api.main import app
+    from claimflow import db
+
+    mock_graph = MagicMock()
+    mock_graph.invoke.return_value = {
+        "domain": None,
+        "documents": [{"path": "/tmp/claim.pdf", "doc_type": "unknown", "has_text_layer": True,
+                        "scan_quality": None, "classification_reason": None}],
+        "extraction_fields": [], "extraction_status": None, "extraction_overall_confidence": None,
+        "validation_failures": [], "policy_answers": [], "decision": None, "review_reasons": [], "error": None,
+    }
+    with patch("api.main.build_graph", return_value=mock_graph):
+        with TestClient(app) as client:
+            pdf_bytes = _make_pdf_bytes()
+            response = client.post(
+                "/packages",
+                files=[("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))],
+            )
+            package_id = response.json()["package_id"]
+
+            docs = client.get(f"/packages/{package_id}/documents").json()
+            document_id = docs[0]["document_id"]
+
+            reclassify_response = client.post(
+                f"/packages/{package_id}/documents/{document_id}/reclassify",
+                json={"doc_type": "cms1500", "reviewer": "jane"},
+            )
+
+    assert reclassify_response.status_code == 200
+    body = reclassify_response.json()
+    assert body["doc_type"] == "cms1500"
+    assert body["manually_overridden"] is True
+
+    session = db.SessionLocal()
+    try:
+        doc = db.get_document(session, document_id)
+        assert doc.doc_type == "cms1500"
+        assert doc.classification_reason == "manual override"
+        assert doc.manually_overridden is True
+    finally:
+        session.close()
+
+
+def test_reclassify_document_404_for_wrong_package():
+    from api.main import app
+    with TestClient(app) as client:
+        response = client.post(
+            "/packages/wrong-package/documents/does-not-exist/reclassify",
+            json={"doc_type": "cms1500"},
+        )
+    assert response.status_code == 404
+
+
+def test_reprocess_passes_overrides_to_graph():
+    from api.main import app
+    from claimflow import db
+
+    mock_graph = MagicMock()
+    mock_graph.invoke.return_value = {
+        "domain": None,
+        "documents": [{"path": "/tmp/claim.pdf", "doc_type": "unknown", "has_text_layer": True,
+                        "scan_quality": None, "classification_reason": None}],
+        "extraction_fields": [], "extraction_status": None, "extraction_overall_confidence": None,
+        "validation_failures": [], "policy_answers": [], "decision": None, "review_reasons": [], "error": None,
+    }
+    with patch("api.main.build_graph", return_value=mock_graph):
+        with TestClient(app) as client:
+            pdf_bytes = _make_pdf_bytes()
+            response = client.post(
+                "/packages",
+                files=[("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))],
+            )
+            package_id = response.json()["package_id"]
+
+            docs = client.get(f"/packages/{package_id}/documents").json()
+            document_id = docs[0]["document_id"]
+            client.post(
+                f"/packages/{package_id}/documents/{document_id}/reclassify",
+                json={"doc_type": "cms1500"},
+            )
+
+            client.post(f"/packages/{package_id}/process")
+
+    assert mock_graph.invoke.call_count == 2
+    second_call_state = mock_graph.invoke.call_args_list[1][0][0]
+    assert second_call_state["doc_type_overrides"] == {"claim.pdf": "cms1500"}

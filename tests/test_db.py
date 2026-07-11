@@ -222,3 +222,21 @@ def test_decision_and_audit_lookups():
     flagged = db.list_flagged_packages(session)
     assert pkg.id in {p.id for p in flagged}
     session.close()
+
+
+def test_create_document_persists_classification_reason():
+    session = _make_session()
+    pkg = db.create_package(session, str(uuid.uuid4()))
+    doc = db.create_document(session, pkg.id, {
+        "path": "/tmp/claim.pdf", "doc_type": "cms1500", "has_text_layer": True,
+        "scan_quality": None, "classification_reason": "matched domain keyword 'cms-1500' for cms1500",
+    })
+    assert doc.classification_reason == "matched domain keyword 'cms-1500' for cms1500"
+    assert doc.manually_overridden is False
+
+    overridden = db.create_document(session, pkg.id, {
+        "path": "/tmp/other.pdf", "doc_type": "eob", "has_text_layer": True,
+        "scan_quality": None, "classification_reason": "manual override", "manually_overridden": True,
+    })
+    assert overridden.manually_overridden is True
+    session.close()
