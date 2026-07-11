@@ -236,3 +236,46 @@ async def get_field_evidence(package_id: str, field_id: int):
         }
     finally:
         session.close()
+
+
+@app.get("/reviews/queue")
+async def reviews_queue():
+    session = db.SessionLocal()
+    try:
+        return [
+            {"package_id": pkg.id, "status": pkg.status, "created_at": pkg.created_at.isoformat()}
+            for pkg in db.list_flagged_packages(session)
+        ]
+    finally:
+        session.close()
+
+
+@app.get("/packages/{package_id}/review")
+async def get_package_review(package_id: str):
+    session = db.SessionLocal()
+    try:
+        pkg = db.get_package(session, package_id)
+        if pkg is None:
+            raise HTTPException(status_code=404, detail="Package not found")
+
+        run = db.latest_extraction_run_for_package(session, package_id)
+        fields = db.list_extracted_fields_for_run(session, run.id) if run else []
+        failures = db.list_validation_failures_for_run(session, run.id) if run else []
+
+        return {
+            "package_id": package_id,
+            "status": pkg.status,
+            "fields": [
+                {
+                    "field_id": f.id, "name": f.name,
+                    "value": json.loads(f.value_json) if f.value_json else None,
+                    "confidence": f.confidence, "field_status": f.field_status,
+                }
+                for f in fields
+            ],
+            "validation_failures": [
+                {"field": vf.field, "rule": vf.rule, "reason": vf.reason} for vf in failures
+            ],
+        }
+    finally:
+        session.close()

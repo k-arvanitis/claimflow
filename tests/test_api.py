@@ -238,3 +238,64 @@ def test_get_field_evidence_404_for_unknown_field():
     with TestClient(app) as client:
         response = client.get("/packages/some-package/fields/999999/evidence")
     assert response.status_code == 404
+
+
+def test_reviews_queue_lists_flagged_packages():
+    from api.main import app
+    from claimflow import db
+
+    mock_graph = MagicMock()
+    mock_graph.invoke.return_value = {
+        "domain": "cms1500",
+        "documents": [{"path": "/tmp/claim.pdf", "doc_type": "cms1500", "has_text_layer": True, "scan_quality": None}],
+        "extraction_fields": [], "extraction_status": "review", "extraction_overall_confidence": 0.5,
+        "validation_failures": [{"field": "diagnosis_codes", "rule": "icd10_lookup", "reason": "bad code"}],
+        "policy_answers": [], "decision": "flagged", "review_reasons": ["bad code"], "error": None,
+    }
+    with patch("api.main.build_graph", return_value=mock_graph):
+        with TestClient(app) as client:
+            pdf_bytes = _make_pdf_bytes()
+            response = client.post(
+                "/packages",
+                files=[("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))],
+            )
+            package_id = response.json()["package_id"]
+
+            queue_response = client.get("/reviews/queue")
+
+    assert queue_response.status_code == 200
+    queue_ids = {item["package_id"] for item in queue_response.json()}
+    assert package_id in queue_ids
+
+
+def test_package_review_view():
+    from api.main import app
+
+    mock_graph = MagicMock()
+    mock_graph.invoke.return_value = {
+        "domain": "cms1500",
+        "documents": [{"path": "/tmp/claim.pdf", "doc_type": "cms1500", "has_text_layer": True, "scan_quality": None}],
+        "extraction_fields": [
+            {"name": "diagnosis_codes", "value": ["XXXXX"], "confidence": 0.5,
+             "grounded": True, "valid": False, "field_status": "found", "evidence": None},
+        ],
+        "extraction_status": "review", "extraction_overall_confidence": 0.5,
+        "validation_failures": [{"field": "diagnosis_codes", "rule": "icd10_lookup", "reason": "bad code"}],
+        "policy_answers": [], "decision": "flagged", "review_reasons": ["bad code"], "error": None,
+    }
+    with patch("api.main.build_graph", return_value=mock_graph):
+        with TestClient(app) as client:
+            pdf_bytes = _make_pdf_bytes()
+            response = client.post(
+                "/packages",
+                files=[("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))],
+            )
+            package_id = response.json()["package_id"]
+
+            review_response = client.get(f"/packages/{package_id}/review")
+
+    assert review_response.status_code == 200
+    body = review_response.json()
+    assert len(body["fields"]) == 1
+    assert body["fields"][0]["name"] == "diagnosis_codes"
+    assert len(body["validation_failures"]) == 1
