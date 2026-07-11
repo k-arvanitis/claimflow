@@ -9,32 +9,47 @@ from claimflow.review import diff_list_field, rerun_validation
 
 
 def test_eob_classifies_by_keyword():
-    assert _classify_doc_type("This is an Explanation of Benefits. This is not a bill.") == "eob"
+    assert _classify_doc_type("This is an Explanation of Benefits. This is not a bill.")[0] == "eob"
 
 
 def test_medicare_summary_notice_classifies_distinctly():
-    assert _classify_doc_type("Your Medicare Summary Notice (MSN) for this quarter") == "medicare_summary_notice"
+    assert _classify_doc_type("Your Medicare Summary Notice (MSN) for this quarter")[0] == "medicare_summary_notice"
 
 
 def test_declarations_page_classifies():
-    assert _classify_doc_type("Homeowners Policy Declarations Page — Coverage A Dwelling") == "declarations_page"
+    assert _classify_doc_type("Homeowners Policy Declarations Page — Coverage A Dwelling")[0] == "declarations_page"
 
 
 def test_sba_form_413_classifies():
-    assert _classify_doc_type("Personal Financial Statement — SBA Form 413") == "sba_form_413"
+    assert _classify_doc_type("Personal Financial Statement — SBA Form 413")[0] == "sba_form_413"
 
 
 def test_sba_form_2202_classifies():
-    assert _classify_doc_type("SBA Form 2202 Schedule of Liabilities") == "sba_form_2202"
+    assert _classify_doc_type("SBA Form 2202 Schedule of Liabilities")[0] == "sba_form_2202"
 
 
 def test_classification_only_docs_route_to_supporting_subtype():
-    assert _classify_doc_type("Prior Authorization required before this procedure") == "prior_authorization_letter"
-    assert _classify_doc_type("UB-04 CMS-1450 uniform billing form") == "ub04_cms1450"
-    assert _classify_doc_type("Roof inspection report attached") == "roof_inspection_report"
-    assert _classify_doc_type("Fire Department Report #12345") == "fire_report"
-    assert _classify_doc_type("Articles of Incorporation filed with the state") == "articles_of_incorporation"
-    assert _classify_doc_type("Form W-2 Wage and Tax Statement") == "w2_1099_paystub"
+    assert _classify_doc_type("Prior Authorization required before this procedure")[0] == "prior_authorization_letter"
+    assert _classify_doc_type("UB-04 CMS-1450 uniform billing form")[0] == "ub04_cms1450"
+    assert _classify_doc_type("Roof inspection report attached")[0] == "roof_inspection_report"
+    assert _classify_doc_type("Fire Department Report #12345")[0] == "fire_report"
+    assert _classify_doc_type("Articles of Incorporation filed with the state")[0] == "articles_of_incorporation"
+    assert _classify_doc_type("Form W-2 Wage and Tax Statement")[0] == "w2_1099_paystub"
+
+
+def test_classify_doc_type_returns_reason():
+    doc_type, reason = _classify_doc_type("HEALTH INSURANCE CLAIM FORM CMS-1500")
+    assert doc_type == "cms1500"
+    assert reason is not None
+    assert "cms-1500" in reason.lower() or "cms1500" in reason.lower()
+
+    doc_type, reason = _classify_doc_type("This is an Explanation of Benefits. This is not a bill.")
+    assert doc_type == "eob"
+    assert reason is not None
+
+    doc_type, reason = _classify_doc_type("completely unrecognizable text with no keywords")
+    assert doc_type == "unknown"
+    assert reason is None
 
 
 def test_all_new_domains_registered():

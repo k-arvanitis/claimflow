@@ -38,19 +38,22 @@ def _scan_quality(text: str) -> float:
     return min(len(text.strip()) / (_TEXT_THRESHOLD * 4), 1.0)
 
 
-def _classify_doc_type(text: str) -> str:
-    """Classify a document into a specific type. A domain's main form takes priority
-    over supporting-document subtypes, so generic terms in a supporting doc can't
-    steal the match away from the form itself."""
+def _classify_doc_type(text: str) -> tuple[str, str | None]:
+    """Classify a document into a specific type, and say why. A domain's main form
+    takes priority over supporting-document subtypes, so generic terms in a
+    supporting doc can't steal the match away from the form itself. Returns
+    (doc_type, reason) — reason is None only for "unknown"."""
     lower = text.lower()
     for domain in all_domains():
-        if any(kw in lower for kw in domain.keywords):
-            return domain.doc_type
+        for kw in domain.keywords:
+            if kw in lower:
+                return domain.doc_type, f"matched domain keyword '{kw}' for {domain.doc_type}"
     for domain in all_domains():
         for subtype, keywords in domain.supporting_types.items():
-            if any(kw in lower for kw in keywords):
-                return subtype
-    return "unknown"
+            for kw in keywords:
+                if kw in lower:
+                    return subtype, f"matched supporting keyword '{kw}' for {subtype}"
+    return "unknown", None
 
 
 def ingest_node(state: ClaimState) -> dict:
@@ -88,15 +91,19 @@ def ingest_node(state: ClaimState) -> dict:
                         "— possible low-quality scan"
                     )
 
-            doc_type = _classify_doc_type(first_page_text)
+            doc_type, classification_reason = _classify_doc_type(first_page_text)
             if doc_type in domain_keys and detected_domain is None:
                 detected_domain = doc_type
             docs.append(IngestedDoc(
                 path=str(pdf_path), doc_type=doc_type,
                 has_text_layer=has_text, scan_quality=scan_quality,
+                classification_reason=classification_reason,
             ))
         except Exception:
             ocr_log.append(f"{name}: ingest failed, marked unknown")
-            docs.append(IngestedDoc(path=str(src_path), doc_type="unknown", has_text_layer=False, scan_quality=None))
+            docs.append(IngestedDoc(
+                path=str(src_path), doc_type="unknown", has_text_layer=False, scan_quality=None,
+                classification_reason=None,
+            ))
 
     return {"documents": docs, "domain": detected_domain, "ocr_log": ocr_log}

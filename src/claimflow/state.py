@@ -6,6 +6,7 @@ class IngestedDoc(TypedDict):
     doc_type: str           # domain form key (e.g. "cms1500"), a supporting subtype (e.g. "medical_bill"), or "unknown"
     has_text_layer: bool
     scan_quality: float | None   # set only when OCR fallback ran on page 1; density heuristic, not real OCR confidence
+    classification_reason: str | None   # why this doc_type was assigned; None for "unknown" or manual override not yet set
 
 
 class ValidationFailure(TypedDict):
