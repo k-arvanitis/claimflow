@@ -130,3 +130,93 @@ def test_persist_extraction_result_writes_all_rows():
     assert session.query(db.PolicyEvidence).filter_by(package_id=pkg.id).count() == 1
     assert session.query(db.Decision).filter_by(package_id=pkg.id).count() == 1
     session.close()
+
+
+def test_list_and_get_package():
+    session = _make_session()
+    pkg1 = db.create_package(session, str(uuid.uuid4()))
+    pkg2 = db.create_package(session, str(uuid.uuid4()))
+
+    all_pkgs = db.list_packages(session)
+    assert {p.id for p in all_pkgs} == {pkg1.id, pkg2.id}
+
+    fetched = db.get_package(session, pkg1.id)
+    assert fetched.id == pkg1.id
+    assert db.get_package(session, "does-not-exist") is None
+    session.close()
+
+
+def test_delete_package_cascades():
+    session = _make_session()
+    pkg = db.create_package(session, str(uuid.uuid4()))
+    doc = db.create_document(session, pkg.id, {
+        "path": "/tmp/claim.pdf", "doc_type": "cms1500", "has_text_layer": True, "scan_quality": None,
+    })
+    run = db.create_extraction_run(session, doc.id, "cms1500", "pass", 0.9)
+    db.create_extracted_fields(session, run.id, [
+        {"name": "patient_name", "value": "DOE JOHN", "confidence": 0.9, "grounded": True,
+         "valid": True, "field_status": "found", "evidence": None},
+    ])
+    db.create_validation_failures(session, run.id, [
+        {"field": "diagnosis_codes", "rule": "icd10_lookup", "reason": "bad code"},
+    ])
+    db.create_policy_evidence(session, pkg.id, [
+        {"question": "q", "answer": "a", "citations": []},
+    ])
+    db.create_decision(session, pkg.id, "flagged", ["bad code"])
+
+    deleted = db.delete_package(session, pkg.id)
+    assert deleted is True
+    assert db.get_package(session, pkg.id) is None
+    assert session.query(db.Document).filter_by(package_id=pkg.id).count() == 0
+    assert session.query(db.ExtractionRun).filter_by(document_id=doc.id).count() == 0
+    assert session.query(db.ExtractedField).filter_by(extraction_run_id=run.id).count() == 0
+    assert session.query(db.ValidationFailure).filter_by(extraction_run_id=run.id).count() == 0
+    assert session.query(db.PolicyEvidence).filter_by(package_id=pkg.id).count() == 0
+    assert session.query(db.Decision).filter_by(package_id=pkg.id).count() == 0
+    assert db.delete_package(session, "does-not-exist") is False
+    session.close()
+
+
+def test_document_and_field_lookups():
+    session = _make_session()
+    pkg = db.create_package(session, str(uuid.uuid4()))
+    doc = db.create_document(session, pkg.id, {
+        "path": "/tmp/claim.pdf", "doc_type": "cms1500", "has_text_layer": True, "scan_quality": None,
+    })
+    run = db.create_extraction_run(session, doc.id, "cms1500", "pass", 0.9)
+    fields = db.create_extracted_fields(session, run.id, [
+        {"name": "patient_name", "value": "DOE JOHN", "confidence": 0.9, "grounded": True,
+         "valid": True, "field_status": "found", "evidence": None},
+    ])
+    failures = db.create_validation_failures(session, run.id, [
+        {"field": "diagnosis_codes", "rule": "icd10_lookup", "reason": "bad code"},
+    ])
+
+    assert [d.id for d in db.list_documents(session, pkg.id)] == [doc.id]
+    assert db.get_document(session, doc.id).id == doc.id
+    assert db.get_document(session, "nope") is None
+    assert db.get_extracted_field(session, fields[0].id).id == fields[0].id
+    assert db.get_extracted_field(session, -1) is None
+    assert [f.id for f in db.list_extracted_fields_for_run(session, run.id)] == [fields[0].id]
+    assert [f.id for f in db.list_validation_failures_for_run(session, run.id)] == [failures[0].id]
+    assert db.latest_extraction_run_for_package(session, pkg.id).id == run.id
+    session.close()
+
+
+def test_decision_and_audit_lookups():
+    session = _make_session()
+    pkg = db.create_package(session, str(uuid.uuid4()))
+    db.create_decision(session, pkg.id, "flagged", ["first"])
+    latest = db.create_decision(session, pkg.id, "escalated", ["second"])
+    db.log_audit(session, pkg.id, "api", "upload")
+
+    assert db.latest_decision_for_package(session, pkg.id).id == latest.id
+    assert len(db.list_decisions_for_package(session, pkg.id)) == 2
+    assert len(db.list_audit_events_for_package(session, pkg.id)) == 1
+    db.create_policy_evidence(session, pkg.id, [{"question": "q", "answer": "a", "citations": []}])
+    assert len(db.list_policy_evidence_for_package(session, pkg.id)) == 1
+
+    flagged = db.list_flagged_packages(session)
+    assert pkg.id in {p.id for p in flagged}
+    session.close()

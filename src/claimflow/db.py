@@ -304,3 +304,112 @@ def persist_extraction_result(session: Session, package_id: str, result: dict) -
         create_policy_evidence(session, package_id, result["policy_answers"])
     if result.get("decision"):
         create_decision(session, package_id, result["decision"], result.get("review_reasons") or [])
+
+
+def list_packages(session: Session) -> list[Package]:
+    return list(session.query(Package).order_by(Package.created_at.desc()).all())
+
+
+def get_package(session: Session, package_id: str) -> Package | None:
+    return session.get(Package, package_id)
+
+
+def delete_package(session: Session, package_id: str) -> bool:
+    pkg = session.get(Package, package_id)
+    if pkg is None:
+        return False
+
+    # ORM-level session.delete() on fetched instances (not bulk .delete()) so that
+    # instances already held by the caller (same identity-mapped objects) are marked
+    # deleted-and-expunged rather than expired; expire_on_commit would otherwise try
+    # to refresh them from rows that no longer exist and raise ObjectDeletedError.
+    documents = session.query(Document).filter_by(package_id=package_id).all()
+    if documents:
+        document_ids = [d.id for d in documents]
+        runs = session.query(ExtractionRun).filter(ExtractionRun.document_id.in_(document_ids)).all()
+        if runs:
+            run_ids = [r.id for r in runs]
+            for field in session.query(ExtractedField).filter(ExtractedField.extraction_run_id.in_(run_ids)).all():
+                session.delete(field)
+            for failure in session.query(ValidationFailure).filter(
+                ValidationFailure.extraction_run_id.in_(run_ids)
+            ).all():
+                session.delete(failure)
+            for run in runs:
+                session.delete(run)
+        for doc in documents:
+            session.delete(doc)
+
+    for evidence in session.query(PolicyEvidence).filter_by(package_id=package_id).all():
+        session.delete(evidence)
+    for decision in session.query(Decision).filter_by(package_id=package_id).all():
+        session.delete(decision)
+    session.delete(pkg)
+    session.commit()
+    return True
+
+
+def list_documents(session: Session, package_id: str) -> list[Document]:
+    return list(session.query(Document).filter_by(package_id=package_id).order_by(Document.created_at).all())
+
+
+def get_document(session: Session, document_id: str) -> Document | None:
+    return session.get(Document, document_id)
+
+
+def get_extracted_field(session: Session, field_id: int) -> ExtractedField | None:
+    return session.get(ExtractedField, field_id)
+
+
+def list_extracted_fields_for_run(session: Session, extraction_run_id: str) -> list[ExtractedField]:
+    return list(session.query(ExtractedField).filter_by(extraction_run_id=extraction_run_id).all())
+
+
+def list_validation_failures_for_run(session: Session, extraction_run_id: str) -> list[ValidationFailure]:
+    return list(session.query(ValidationFailure).filter_by(extraction_run_id=extraction_run_id).all())
+
+
+def latest_extraction_run_for_package(session: Session, package_id: str) -> ExtractionRun | None:
+    return (
+        session.query(ExtractionRun)
+        .join(Document, ExtractionRun.document_id == Document.id)
+        .filter(Document.package_id == package_id)
+        .order_by(ExtractionRun.created_at.desc())
+        .first()
+    )
+
+
+def list_policy_evidence_for_package(session: Session, package_id: str) -> list[PolicyEvidence]:
+    return list(session.query(PolicyEvidence).filter_by(package_id=package_id).all())
+
+
+def latest_decision_for_package(session: Session, package_id: str) -> Decision | None:
+    return (
+        session.query(Decision)
+        .filter_by(package_id=package_id)
+        .order_by(Decision.created_at.desc())
+        .first()
+    )
+
+
+def list_decisions_for_package(session: Session, package_id: str) -> list[Decision]:
+    return list(session.query(Decision).filter_by(package_id=package_id).order_by(Decision.created_at).all())
+
+
+def list_audit_events_for_package(session: Session, package_id: str) -> list[AuditLogEntry]:
+    return list(
+        session.query(AuditLogEntry).filter_by(package_id=package_id).order_by(AuditLogEntry.timestamp).all()
+    )
+
+
+def list_flagged_packages(session: Session) -> list[Package]:
+    latest_by_package: dict[str, Decision] = {}
+    for decision in session.query(Decision).order_by(Decision.created_at).all():
+        latest_by_package[decision.package_id] = decision
+
+    flagged_ids = [
+        pid for pid, decision in latest_by_package.items() if decision.decision in ("flagged", "escalated")
+    ]
+    if not flagged_ids:
+        return []
+    return list(session.query(Package).filter(Package.id.in_(flagged_ids)).all())
