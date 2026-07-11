@@ -1,6 +1,50 @@
 from unittest.mock import MagicMock, patch
 
 
+def test_ingest_node_uses_build_artifact(tmp_path):
+    """Ingest node delegates OCR/text-layer detection to doc-intel's build_artifact,
+    not its own fitz call."""
+    from unittest.mock import MagicMock, patch
+
+    pkg = tmp_path / "package"
+    pkg.mkdir()
+    claim_pdf = pkg / "claim.pdf"
+    claim_pdf.write_bytes(b"placeholder")
+
+    fake_page = MagicMock()
+    fake_page.text = "HEALTH INSURANCE CLAIM FORM CMS-1500\nBox 1a: INS123"
+    fake_page.native_text_available = True
+    fake_page.ocr_used = False
+    fake_artifact = MagicMock()
+    fake_artifact.pages = [fake_page]
+
+    with patch("claimflow.nodes.ingest.build_artifact", return_value=fake_artifact) as mock_build:
+        from claimflow.nodes.ingest import ingest_node
+        from claimflow.state import ClaimState
+
+        state: ClaimState = {
+            "package_dir": str(pkg),
+            "documents": [],
+            "extraction_data": None,
+            "extraction_fields": None,
+            "extraction_status": None,
+            "extraction_overall_confidence": None,
+            "validation_failures": [],
+            "policy_answers": [],
+            "decision": None,
+            "review_reasons": [],
+            "error": None,
+        }
+        result = ingest_node(state)
+
+    assert mock_build.called
+    docs = result["documents"]
+    assert len(docs) == 1
+    assert docs[0]["doc_type"] == "cms1500"
+    assert docs[0]["has_text_layer"] is True
+    assert docs[0]["scan_quality"] is None
+
+
 def test_ingest_node_classifies_cms1500(tmp_path):
     """Ingest node identifies the claim form and supporting docs."""
     pkg = tmp_path / "package"

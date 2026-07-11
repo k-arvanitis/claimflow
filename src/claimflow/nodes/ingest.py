@@ -1,7 +1,7 @@
 import subprocess
 from pathlib import Path
 
-import fitz  # PyMuPDF
+from doc_intel.artifact import build_artifact
 
 import claimflow.domains  # noqa: F401 — triggers domain register() calls
 from claimflow.domains.base import all_domains
@@ -29,18 +29,6 @@ def _office_to_pdf(path: Path, out_dir: Path) -> Path:
     if not pdf_path.exists():
         raise FileNotFoundError(f"LibreOffice did not produce {pdf_path}")
     return pdf_path
-
-
-def ocr_page(doc: fitz.Document, page_index: int) -> str:
-    """Run tesseract OCR on one page of a scanned PDF via fitz's built-in OCR."""
-    if page_index >= len(doc):
-        return ""
-    try:
-        page = doc[page_index]
-        tp = page.get_textpage_ocr(dpi=300, full=False)
-        return page.get_text(textpage=tp)
-    except Exception:
-        return ""
 
 
 def _scan_quality(text: str) -> float:
@@ -85,14 +73,14 @@ def ingest_node(state: ClaimState) -> dict:
             else:
                 pdf_path = src_path
 
-            doc = fitz.open(str(pdf_path))
-            first_page_text = next(iter(doc)).get_text() if len(doc) > 0 else ""
-            has_text = len(first_page_text.strip()) >= _TEXT_THRESHOLD
+            artifact = build_artifact(str(pdf_path))
+            page1 = artifact.pages[0] if artifact.pages else None
+            first_page_text = page1.text if page1 else ""
+            has_text = bool(page1 and page1.native_text_available)
             scan_quality: float | None = None
 
-            if not has_text:
+            if page1 and page1.ocr_used:
                 ocr_log.append(f"{name}: page 1 has no text layer — falling back to OCR")
-                first_page_text = ocr_page(doc, 0)
                 scan_quality = _scan_quality(first_page_text)
                 if len(first_page_text.strip()) < _OCR_LOW_CONF_THRESHOLD:
                     ocr_log.append(
