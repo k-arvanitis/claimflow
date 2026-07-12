@@ -13,7 +13,15 @@ from claimflow import db, review
 from claimflow.config import settings
 from claimflow.graph import build_graph
 from claimflow.pages import render_page
+from claimflow.schemas.enums import PackageStatus
 from claimflow.schemas.errors import AppError, ErrorBody, ErrorEnvelope
+from claimflow.schemas.packages import (
+    PackageCreateResponse,
+    PackageDeleteResponse,
+    PackageDetailResponse,
+    PackageStatusResponse,
+    PackageSummary,
+)
 from claimflow.tracing import get_callback
 
 logger = logging.getLogger(__name__)
@@ -115,7 +123,7 @@ def _run_claim(graph, package_id: str, pkg_dir: Path, doc_type_overrides: dict[s
         session.close()
 
 
-@app.post("/packages")
+@app.post("/packages", response_model=PackageCreateResponse)
 async def create_package(files: list[UploadFile], background_tasks: BackgroundTasks):
     package_id = str(uuid.uuid4())
     pkg_dir = Path(settings.storage_dir) / package_id
@@ -133,39 +141,39 @@ async def create_package(files: list[UploadFile], background_tasks: BackgroundTa
         session.close()
 
     background_tasks.add_task(_run_claim, app.state.graph, package_id, pkg_dir)
-    return {"package_id": package_id, "status": "queued"}
+    return PackageCreateResponse(package_id=package_id, status=PackageStatus.QUEUED)
 
 
-@app.get("/packages")
+@app.get("/packages", response_model=list[PackageSummary])
 async def list_packages():
     session = db.SessionLocal()
     try:
         return [
-            {"package_id": pkg.id, "status": pkg.status, "created_at": pkg.created_at.isoformat()}
+            PackageSummary(package_id=pkg.id, status=pkg.status, created_at=pkg.created_at)
             for pkg in db.list_packages(session)
         ]
     finally:
         session.close()
 
 
-@app.get("/packages/{package_id}")
+@app.get("/packages/{package_id}", response_model=PackageDetailResponse)
 async def get_package(package_id: str):
     session = db.SessionLocal()
     try:
         pkg = db.get_package(session, package_id)
         if pkg is None:
             raise AppError(404, "PACKAGE_NOT_FOUND", "Package does not exist")
-        return {
-            "package_id": pkg.id,
-            "status": pkg.status,
-            "result": json.loads(pkg.result_json) if pkg.result_json else None,
-            "error": pkg.error,
-        }
+        return PackageDetailResponse(
+            package_id=pkg.id,
+            status=pkg.status,
+            result=json.loads(pkg.result_json) if pkg.result_json else None,
+            error=pkg.error,
+        )
     finally:
         session.close()
 
 
-@app.delete("/packages/{package_id}")
+@app.delete("/packages/{package_id}", response_model=PackageDeleteResponse)
 async def delete_package(package_id: str):
     session = db.SessionLocal()
     try:
@@ -177,10 +185,10 @@ async def delete_package(package_id: str):
 
     pkg_dir = Path(settings.storage_dir) / package_id
     shutil.rmtree(pkg_dir, ignore_errors=True)
-    return {"package_id": package_id, "status": "deleted"}
+    return PackageDeleteResponse(package_id=package_id, status="deleted")
 
 
-@app.post("/packages/{package_id}/process")
+@app.post("/packages/{package_id}/process", response_model=PackageCreateResponse)
 async def process_package(package_id: str, background_tasks: BackgroundTasks):
     session = db.SessionLocal()
     try:
@@ -197,17 +205,17 @@ async def process_package(package_id: str, background_tasks: BackgroundTasks):
 
     pkg_dir = Path(settings.storage_dir) / package_id
     background_tasks.add_task(_run_claim, app.state.graph, package_id, pkg_dir, overrides)
-    return {"package_id": package_id, "status": "queued"}
+    return PackageCreateResponse(package_id=package_id, status=PackageStatus.QUEUED)
 
 
-@app.get("/packages/{package_id}/status")
+@app.get("/packages/{package_id}/status", response_model=PackageStatusResponse)
 async def get_package_status(package_id: str):
     session = db.SessionLocal()
     try:
         pkg = db.get_package(session, package_id)
         if pkg is None:
             raise AppError(404, "PACKAGE_NOT_FOUND", "Package does not exist")
-        return {"package_id": pkg.id, "status": pkg.status}
+        return PackageStatusResponse(package_id=pkg.id, status=pkg.status)
     finally:
         session.close()
 
