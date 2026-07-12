@@ -1,11 +1,21 @@
 .PHONY: install dev test lint api ui eval docker-up docker-down seed generate clean \
-	download-real-public eval-health-public eval-property-public eval-loan-public eval-real-public
+	download-real-public eval-health-public eval-property-public eval-loan-public eval-real-public \
+	db-migrate db-init db-revision
 
 install:
 	uv sync
 
 dev:
 	uv sync --extra dev
+
+db-migrate:
+	uv run alembic upgrade head
+
+db-init: db-migrate
+	@echo "Database initialized at $$(uv run python -c 'from claimflow.config import settings; print(settings.db_path)')"
+
+db-revision:
+	uv run alembic revision --autogenerate -m "$(MSG)"
 
 test:
 	uv run pytest tests/ -v
