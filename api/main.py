@@ -54,6 +54,13 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     app.state.graph = build_graph()
     db.init_db()
+    session = db.SessionLocal()
+    try:
+        recovered = db.recover_stale_processing_packages(session)
+        if recovered:
+            logger.warning("Recovered %d stale processing package(s) on startup: %s", len(recovered), recovered)
+    finally:
+        session.close()
     logger.info("ClaimFlow graph initialised")
     yield
     logger.info("ClaimFlow shutting down")

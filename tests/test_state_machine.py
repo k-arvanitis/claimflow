@@ -16,6 +16,22 @@ def session(tmp_path):
     return sessionmaker(bind=engine)()
 
 
+def test_recover_stale_processing_packages_marks_them_processing_error(session):
+    session.add(db.Package(id="pkg-stuck", status="processing"))
+    session.add(db.Package(id="pkg-fine", status="completed"))
+    session.commit()
+
+    recovered = db.recover_stale_processing_packages(session)
+
+    assert recovered == ["pkg-stuck"]
+    assert session.get(db.Package, "pkg-stuck").status == "processing_error"
+    assert session.get(db.Package, "pkg-stuck").error == "process interrupted by application restart"
+    assert session.get(db.Package, "pkg-fine").status == "completed"
+
+    entries = session.query(db.AuditLogEntry).filter_by(package_id="pkg-stuck", action="status_transition").all()
+    assert len(entries) == 1
+
+
 def test_transition_package_status_logs_audit_entry(session):
     session.add(db.Package(id="pkg1", status="queued"))
     session.commit()

@@ -237,6 +237,22 @@ def transition_package_status(
     )
 
 
+def recover_stale_processing_packages(session: Session) -> list[str]:
+    """Called once at app startup. A package can only be "processing" if a
+    background task is actively running it — if the app just started, no such
+    task exists, so any package found in this state was orphaned by a prior
+    crash/restart. Mark it as a retryable failure rather than leaving it stuck."""
+    stuck = session.query(Package).filter_by(status="processing").all()
+    recovered_ids = []
+    for pkg in stuck:
+        transition_package_status(
+            session, pkg.id, "processing_error",
+            reason="restart_recovery", error="process interrupted by application restart",
+        )
+        recovered_ids.append(pkg.id)
+    return recovered_ids
+
+
 _RETRYABLE_STATUSES = (
     "queued", "review_ready", "completed", "processing_error", "validation_error", "retrieval_error",
 )
