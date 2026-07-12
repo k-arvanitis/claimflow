@@ -184,7 +184,17 @@ SessionLocal = sessionmaker(bind=engine)
 
 
 def init_db() -> None:
-    Base.metadata.create_all(engine)
+    """Applies Alembic migrations. NOT the schema source of truth by itself —
+    the migrations under alembic/versions/ are; this just runs them.
+    Tests bypass this and call Base.metadata.create_all() directly against a
+    throwaway per-test DB (see tests/conftest.py) for speed/isolation."""
+    from pathlib import Path
+
+    from alembic import command
+    from alembic.config import Config
+
+    cfg = Config(str(Path(__file__).resolve().parent.parent.parent / "alembic.ini"))
+    command.upgrade(cfg, "head")
 
 
 def create_package(session: Session, package_id: str) -> Package:
