@@ -151,7 +151,7 @@ def test_reprocess_package():
 
             reprocess_response = client.post(f"/packages/{package_id}/process")
             assert reprocess_response.status_code == 200
-            assert reprocess_response.json()["status"] == "queued"
+            assert reprocess_response.json()["status"] == "processing"
 
     assert mock_graph.invoke.call_count == 2
 
@@ -185,7 +185,7 @@ def test_package_status():
 
     assert status_response.status_code == 200
     body = status_response.json()
-    assert body == {"package_id": package_id, "status": "completed"}
+    assert body == {"package_id": package_id, "status": "review_ready"}
 
 
 def test_get_documents_for_package():

@@ -1,7 +1,11 @@
+from unittest.mock import MagicMock
+
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from api.main import _classify_exception, _run_claim, app
 from claimflow import db
 
 
@@ -57,3 +61,118 @@ def test_extraction_run_attempt_increments_on_reprocess(session):
 
     assert run1.attempt == 1
     assert run2.attempt == 2
+
+
+def test_process_rejects_concurrent_call(monkeypatch):
+    with TestClient(app) as client:
+        create = client.post("/packages", files={"files": ("a.pdf", b"%PDF-1.4", "application/pdf")})
+        package_id = create.json()["package_id"]
+
+        session = db.SessionLocal()
+        db.transition_package_status(session, package_id, "processing", reason="test setup")
+        session.close()
+
+        resp = client.post(f"/packages/{package_id}/process")
+
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == "PROCESSING_IN_PROGRESS"
+
+
+def test_process_allows_retry_after_processing_error(monkeypatch):
+    with TestClient(app) as client:
+        create = client.post("/packages", files={"files": ("a.pdf", b"%PDF-1.4", "application/pdf")})
+        package_id = create.json()["package_id"]
+
+        session = db.SessionLocal()
+        db.transition_package_status(session, package_id, "processing_error", reason="test setup")
+        session.close()
+
+        resp = client.post(f"/packages/{package_id}/process")
+
+    assert resp.status_code == 200
+
+
+def test_run_claim_classifies_structured_error_as_processing_error(tmp_path):
+    graph = MagicMock()
+    graph.invoke.return_value = {
+        "decision": None, "extraction_data": None, "domain": None, "documents": [],
+        "extraction_fields": [], "validation_failures": [], "policy_answers": [],
+        "review_reasons": [], "error": "No supported domain detected in package",
+    }
+    graph.get_state.return_value = MagicMock(values={})
+
+    session = db.SessionLocal()
+    db.create_package(session, "pkg-err")
+    session.close()
+
+    _run_claim(graph, "pkg-err", tmp_path)
+
+    session = db.SessionLocal()
+    pkg = db.get_package(session, "pkg-err")
+    assert pkg.status == "processing_error"
+
+
+def test_run_claim_classifies_approved_decision_as_completed(tmp_path):
+    graph = MagicMock()
+    graph.invoke.return_value = {
+        "decision": "approved", "extraction_data": {}, "domain": "cms1500", "documents": [],
+        "extraction_fields": [], "validation_failures": [], "policy_answers": [],
+        "review_reasons": [], "error": None,
+    }
+
+    session = db.SessionLocal()
+    db.create_package(session, "pkg-ok")
+    session.close()
+
+    _run_claim(graph, "pkg-ok", tmp_path)
+
+    session = db.SessionLocal()
+    pkg = db.get_package(session, "pkg-ok")
+    assert pkg.status == "completed"
+
+
+def test_run_claim_classifies_flagged_decision_as_review_ready(tmp_path):
+    graph = MagicMock()
+    graph.invoke.return_value = {
+        "decision": "flagged", "extraction_data": {}, "domain": "cms1500", "documents": [],
+        "extraction_fields": [], "validation_failures": [], "policy_answers": [],
+        "review_reasons": ["low confidence"], "error": None,
+    }
+
+    session = db.SessionLocal()
+    db.create_package(session, "pkg-flag")
+    session.close()
+
+    _run_claim(graph, "pkg-flag", tmp_path)
+
+    session = db.SessionLocal()
+    pkg = db.get_package(session, "pkg-flag")
+    assert pkg.status == "review_ready"
+
+
+def test_classify_exception_retrieval_error_when_validation_not_reached():
+    graph = MagicMock()
+    graph.get_state.return_value = MagicMock(
+        values={"validation_failures": [], "extraction_data": {"a": 1}}
+    )
+    assert _classify_exception(graph, {}) == "retrieval_error"
+
+
+def test_classify_exception_validation_error_when_extraction_done_but_no_validation():
+    graph = MagicMock()
+    graph.get_state.return_value = MagicMock(
+        values={"extraction_data": {"a": 1}, "validation_failures": None, "policy_answers": []}
+    )
+    assert _classify_exception(graph, {}) == "validation_error"
+
+
+def test_classify_exception_processing_error_when_no_state_reached():
+    graph = MagicMock()
+    graph.get_state.return_value = MagicMock(values={})
+    assert _classify_exception(graph, {}) == "processing_error"
+
+
+def test_classify_exception_processing_error_when_get_state_raises():
+    graph = MagicMock()
+    graph.get_state.side_effect = RuntimeError("no checkpoint")
+    assert _classify_exception(graph, {}) == "processing_error"

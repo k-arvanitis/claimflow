@@ -110,18 +110,31 @@ def health():
     return {"status": "ok"}
 
 
+def _classify_exception(graph, config) -> str:
+    """An uncaught exception can only happen inside retrieve_node (external
+    Qdrant/LLM calls) or an unexpected crash elsewhere — ingest_node and
+    extract_node catch their own errors and return them as state instead of
+    raising. Inspect the checkpointer's last-known state for this run to see
+    which node was reached, and classify accordingly."""
+    try:
+        state = graph.get_state(config)
+        values = state.values or {}
+    except Exception:
+        return "processing_error"
+
+    if values.get("validation_failures") is not None and "policy_answers" not in values:
+        return "retrieval_error"
+    if values.get("extraction_data") is not None and values.get("validation_failures") is None:
+        return "validation_error"
+    return "processing_error"
+
+
 def _run_claim(graph, package_id: str, pkg_dir: Path, doc_type_overrides: dict[str, str] | None = None) -> None:
     session = db.SessionLocal()
+    thread_id = str(uuid.uuid4())
+    config = {"callbacks": get_callback(), "configurable": {"thread_id": thread_id}}
     try:
-        db.update_package_status(session, package_id, "processing")
-        db.log_audit(session, package_id, "api", "extract")
-
-        thread_id = str(uuid.uuid4())
         state = {"package_dir": str(pkg_dir), "domain": None, "doc_type_overrides": doc_type_overrides or {}}
-        config = {
-            "callbacks": get_callback(),
-            "configurable": {"thread_id": thread_id},
-        }
         result = graph.invoke(state, config=config)
 
         response = {
@@ -138,12 +151,22 @@ def _run_claim(graph, package_id: str, pkg_dir: Path, doc_type_overrides: dict[s
             "error": result.get("error"),
         }
         db.log_audit(session, package_id, "api", "validate", {"validation_failures": response["validation_failures"]})
-        db.update_package_status(session, package_id, "failed" if response["error"] else "completed", result=response)
-        if not response["error"]:
-            db.persist_extraction_result(session, package_id, result)
+
+        if response["error"]:
+            final_status = "processing_error"
+        elif response["decision"] == "approved":
+            final_status = "completed"
+        else:
+            final_status = "review_ready"
+
+        db.transition_package_status(
+            session, package_id, final_status, reason=f"graph completed, decision={response['decision']}", result=response,
+        )
+        db.persist_extraction_result(session, package_id, result)
     except Exception as exc:
         logger.error("Background claim processing failed: %s", exc, exc_info=True)
-        db.update_package_status(session, package_id, "failed", error=str(exc))
+        failure_status = _classify_exception(graph, config)
+        db.transition_package_status(session, package_id, failure_status, reason=str(exc), error=str(exc))
     finally:
         session.close()
 
@@ -168,6 +191,7 @@ async def create_package(files: list[UploadFile], background_tasks: BackgroundTa
     try:
         db.create_package(session, package_id)
         db.log_audit(session, package_id, "api", "upload", {"filenames": [f.filename for f in files]})
+        db.transition_package_status(session, package_id, "queued", reason="upload complete")
     finally:
         session.close()
 
@@ -239,7 +263,7 @@ async def delete_package(package_id: str):
     response_model=PackageCreateResponse,
     tags=["packages"],
     summary="Re-run extraction and validation for an existing package",
-    responses=ERROR_RESPONSES,
+    responses={**ERROR_RESPONSES, 409: {"model": ErrorEnvelope}},
 )
 async def process_package(package_id: str, background_tasks: BackgroundTasks):
     session = db.SessionLocal()
@@ -252,12 +276,15 @@ async def process_package(package_id: str, background_tasks: BackgroundTasks):
             for doc in db.list_documents(session, package_id)
             if doc.manually_overridden
         }
+        started = db.try_start_processing(session, package_id)
+        if not started:
+            raise AppError(409, "PROCESSING_IN_PROGRESS", "Package is already being processed")
     finally:
         session.close()
 
     pkg_dir = Path(settings.storage_dir) / package_id
     background_tasks.add_task(_run_claim, app.state.graph, package_id, pkg_dir, overrides)
-    return PackageCreateResponse(package_id=package_id, status=PackageStatus.QUEUED)
+    return PackageCreateResponse(package_id=package_id, status=PackageStatus.PROCESSING)
 
 
 @app.get(
