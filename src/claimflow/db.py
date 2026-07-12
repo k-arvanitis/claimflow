@@ -388,12 +388,28 @@ def record_review_action(
     reviewer: str = "reviewer",
     note: str | None = None,
 ) -> ReviewAction:
+    corrected_value_json = json.dumps(corrected_value) if corrected_value is not None else None
+    existing = (
+        session.query(ReviewAction)
+        .filter_by(extraction_run_id=extraction_run_id, field_name=field_name)
+        .order_by(ReviewAction.created_at.desc())
+        .first()
+    )
+    if (
+        existing is not None
+        and existing.action == action
+        and existing.corrected_value_json == corrected_value_json
+        and existing.reviewer == reviewer
+        and existing.note == note
+    ):
+        return existing
+
     row = ReviewAction(
         extraction_run_id=extraction_run_id,
         field_name=field_name,
         action=action,
         original_value_json=json.dumps(original_value) if original_value is not None else None,
-        corrected_value_json=json.dumps(corrected_value) if corrected_value is not None else None,
+        corrected_value_json=corrected_value_json,
         validation_before_json=json.dumps(validation_before) if validation_before is not None else None,
         validation_after_json=json.dumps(validation_after) if validation_after is not None else None,
         reviewer=reviewer,
