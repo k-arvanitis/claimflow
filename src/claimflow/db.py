@@ -246,6 +246,10 @@ def try_start_processing(session: Session, package_id: str) -> bool:
     """Atomic compare-and-swap: only transitions package_id to "processing" if
     it isn't already processing. Returns False if the package doesn't exist,
     or another call already won the race and is currently processing it."""
+    package = session.get(Package, package_id)
+    if package is None:
+        return False
+    previous_status = package.status
     result = session.execute(
         Package.__table__.update()
         .where(Package.id == package_id, Package.status.in_(_RETRYABLE_STATUSES))
@@ -254,7 +258,7 @@ def try_start_processing(session: Session, package_id: str) -> bool:
     session.commit()
     if result.rowcount == 0:
         return False
-    log_audit(session, package_id, "api", "status_transition", {"to": "processing", "reason": "process started"})
+    log_audit(session, package_id, "api", "status_transition", {"from": previous_status, "to": "processing", "reason": "process started"})
     return True
 
 
