@@ -23,6 +23,12 @@ from claimflow.schemas.packages import (
     PackageStatusResponse,
     PackageSummary,
 )
+from claimflow.schemas.review_read import (
+    FieldEvidenceResponse,
+    PackageReviewResponse,
+    ReviewFieldSummary,
+    ReviewValidationFailure,
+)
 from claimflow.tracing import get_callback
 
 logger = logging.getLogger(__name__)
@@ -298,41 +304,41 @@ async def get_document_page_image(package_id: str, document_id: str, page: int, 
     return Response(content=image_bytes, media_type="image/png")
 
 
-@app.get("/packages/{package_id}/fields/{field_id}/evidence")
+@app.get("/packages/{package_id}/fields/{field_id}/evidence", response_model=FieldEvidenceResponse)
 async def get_field_evidence(package_id: str, field_id: int):
     session = db.SessionLocal()
     try:
         field = db.get_extracted_field(session, field_id)
         if field is None:
-            raise HTTPException(status_code=404, detail="Field not found")
+            raise AppError(404, "FIELD_NOT_FOUND", "Field does not exist")
         run = session.get(db.ExtractionRun, field.extraction_run_id)
         doc = session.get(db.Document, run.document_id) if run else None
         if doc is None or doc.package_id != package_id:
-            raise HTTPException(status_code=404, detail="Field not found")
-        return {
-            "field_id": field.id,
-            "name": field.name,
-            "value": json.loads(field.value_json) if field.value_json else None,
-            "confidence": field.confidence,
-            "evidence": json.loads(field.evidence_json) if field.evidence_json else None,
-        }
+            raise AppError(404, "FIELD_NOT_FOUND", "Field does not exist")
+        return FieldEvidenceResponse(
+            field_id=field.id,
+            name=field.name,
+            value=json.loads(field.value_json) if field.value_json else None,
+            confidence=field.confidence,
+            evidence=json.loads(field.evidence_json) if field.evidence_json else None,
+        )
     finally:
         session.close()
 
 
-@app.get("/reviews/queue")
+@app.get("/reviews/queue", response_model=list[PackageSummary])
 async def reviews_queue():
     session = db.SessionLocal()
     try:
         return [
-            {"package_id": pkg.id, "status": pkg.status, "created_at": pkg.created_at.isoformat()}
+            PackageSummary(package_id=pkg.id, status=pkg.status, created_at=pkg.created_at)
             for pkg in db.list_flagged_packages(session)
         ]
     finally:
         session.close()
 
 
-@app.get("/packages/{package_id}/review")
+@app.get("/packages/{package_id}/review", response_model=PackageReviewResponse)
 async def get_package_review(package_id: str):
     session = db.SessionLocal()
     try:
@@ -344,21 +350,21 @@ async def get_package_review(package_id: str):
         fields = db.list_extracted_fields_for_run(session, run.id) if run else []
         failures = db.list_validation_failures_for_run(session, run.id) if run else []
 
-        return {
-            "package_id": package_id,
-            "status": pkg.status,
-            "fields": [
-                {
-                    "field_id": f.id, "name": f.name,
-                    "value": json.loads(f.value_json) if f.value_json else None,
-                    "confidence": f.confidence, "field_status": f.field_status,
-                }
+        return PackageReviewResponse(
+            package_id=package_id,
+            status=pkg.status,
+            fields=[
+                ReviewFieldSummary(
+                    field_id=f.id, name=f.name,
+                    value=json.loads(f.value_json) if f.value_json else None,
+                    confidence=f.confidence, field_status=f.field_status,
+                )
                 for f in fields
             ],
-            "validation_failures": [
-                {"field": vf.field, "rule": vf.rule, "reason": vf.reason} for vf in failures
+            validation_failures=[
+                ReviewValidationFailure(field=vf.field, rule=vf.rule, reason=vf.reason) for vf in failures
             ],
-        }
+        )
     finally:
         session.close()
 
