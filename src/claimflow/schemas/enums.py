@@ -2,10 +2,14 @@ from enum import Enum
 
 
 class PackageStatus(str, Enum):
+    UPLOADED = "uploaded"
     QUEUED = "queued"
     PROCESSING = "processing"
+    REVIEW_READY = "review_ready"
     COMPLETED = "completed"
-    FAILED = "failed"
+    PROCESSING_ERROR = "processing_error"
+    VALIDATION_ERROR = "validation_error"
+    RETRIEVAL_ERROR = "retrieval_error"
 
 
 class ExtractionRunStatus(str, Enum):

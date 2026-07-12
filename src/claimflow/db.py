@@ -85,6 +85,7 @@ class ExtractionRun(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True)
     document_id: Mapped[str] = mapped_column(ForeignKey("documents.id", ondelete="CASCADE"), index=True)
     schema_name: Mapped[str] = mapped_column(String)
+    attempt: Mapped[int] = mapped_column(default=1)
     status: Mapped[str] = mapped_column(String)  # pass|review|error
     overall_confidence: Mapped[float] = mapped_column(Float)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
@@ -216,6 +217,47 @@ def update_package_status(
     session.commit()
 
 
+def transition_package_status(
+    session: Session,
+    package_id: str,
+    status: str,
+    *,
+    reason: str | None = None,
+    error: str | None = None,
+    result: dict | None = None,
+) -> None:
+    """The only status-writing path processing code should use — logs one
+    audit entry per transition so the full lifecycle is reconstructable."""
+    pkg = session.get(Package, package_id)
+    previous_status = pkg.status
+    update_package_status(session, package_id, status, result=result, error=error)
+    log_audit(
+        session, package_id, "api", "status_transition",
+        {"from": previous_status, "to": status, "reason": reason},
+    )
+
+
+_RETRYABLE_STATUSES = (
+    "queued", "review_ready", "completed", "processing_error", "validation_error", "retrieval_error",
+)
+
+
+def try_start_processing(session: Session, package_id: str) -> bool:
+    """Atomic compare-and-swap: only transitions package_id to "processing" if
+    it isn't already processing. Returns False if the package doesn't exist,
+    or another call already won the race and is currently processing it."""
+    result = session.execute(
+        Package.__table__.update()
+        .where(Package.id == package_id, Package.status.in_(_RETRYABLE_STATUSES))
+        .values(status="processing")
+    )
+    session.commit()
+    if result.rowcount == 0:
+        return False
+    log_audit(session, package_id, "api", "status_transition", {"to": "processing", "reason": "process started"})
+    return True
+
+
 def log_audit(session: Session, package_id: str, actor: str, action: str, detail: dict | None = None) -> None:
     session.add(AuditLogEntry(
         package_id=package_id, actor=actor, action=action,
@@ -248,10 +290,12 @@ def create_document(session: Session, package_id: str, doc: dict) -> Document:
 def create_extraction_run(
     session: Session, document_id: str, schema_name: str, status: str, overall_confidence: float
 ) -> ExtractionRun:
+    prior_attempts = session.query(ExtractionRun).filter_by(document_id=document_id).count()
     row = ExtractionRun(
         id=str(uuid.uuid4()),
         document_id=document_id,
         schema_name=schema_name,
+        attempt=prior_attempts + 1,
         status=status,
         overall_confidence=overall_confidence,
     )
