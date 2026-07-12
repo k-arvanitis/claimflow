@@ -13,6 +13,7 @@ from claimflow import db, review
 from claimflow.config import settings
 from claimflow.graph import build_graph
 from claimflow.pages import render_page
+from claimflow.schemas.documents import DocumentReclassifyRequest, DocumentReclassifyResponse, DocumentSummary
 from claimflow.schemas.enums import PackageStatus
 from claimflow.schemas.errors import AppError, ErrorBody, ErrorEnvelope
 from claimflow.schemas.packages import (
@@ -220,59 +221,62 @@ async def get_package_status(package_id: str):
         session.close()
 
 
-@app.get("/packages/{package_id}/documents")
+@app.get("/packages/{package_id}/documents", response_model=list[DocumentSummary])
 async def list_package_documents(package_id: str):
     session = db.SessionLocal()
     try:
         return [
-            {
-                "document_id": doc.id, "path": doc.path, "doc_type": doc.doc_type,
-                "has_text_layer": doc.has_text_layer, "scan_quality": doc.scan_quality,
-                "classification_reason": doc.classification_reason, "manually_overridden": doc.manually_overridden,
-            }
+            DocumentSummary(
+                document_id=doc.id, path=doc.path, doc_type=doc.doc_type,
+                has_text_layer=doc.has_text_layer, scan_quality=doc.scan_quality,
+                classification_reason=doc.classification_reason, manually_overridden=doc.manually_overridden,
+            )
             for doc in db.list_documents(session, package_id)
         ]
     finally:
         session.close()
 
 
-@app.get("/packages/{package_id}/documents/{document_id}")
+@app.get("/packages/{package_id}/documents/{document_id}", response_model=DocumentSummary)
 async def get_package_document(package_id: str, document_id: str):
     session = db.SessionLocal()
     try:
         doc = db.get_document(session, document_id)
         if doc is None or doc.package_id != package_id:
-            raise HTTPException(status_code=404, detail="Document not found")
-        return {
-            "document_id": doc.id, "path": doc.path, "doc_type": doc.doc_type,
-            "has_text_layer": doc.has_text_layer, "scan_quality": doc.scan_quality,
-            "classification_reason": doc.classification_reason, "manually_overridden": doc.manually_overridden,
-        }
+            raise AppError(404, "DOCUMENT_NOT_FOUND", "Document does not exist")
+        return DocumentSummary(
+            document_id=doc.id, path=doc.path, doc_type=doc.doc_type,
+            has_text_layer=doc.has_text_layer, scan_quality=doc.scan_quality,
+            classification_reason=doc.classification_reason, manually_overridden=doc.manually_overridden,
+        )
     finally:
         session.close()
 
 
-@app.post("/packages/{package_id}/documents/{document_id}/reclassify")
-async def reclassify_document(package_id: str, document_id: str, body: dict):
+@app.post(
+    "/packages/{package_id}/documents/{document_id}/reclassify",
+    response_model=DocumentReclassifyResponse,
+)
+async def reclassify_document(package_id: str, document_id: str, body: DocumentReclassifyRequest):
     session = db.SessionLocal()
     try:
         doc = db.get_document(session, document_id)
         if doc is None or doc.package_id != package_id:
-            raise HTTPException(status_code=404, detail="Document not found")
+            raise AppError(404, "DOCUMENT_NOT_FOUND", "Document does not exist")
 
-        doc.doc_type = body["doc_type"]
+        doc.doc_type = body.doc_type.value
         doc.classification_reason = "manual override"
         doc.manually_overridden = True
         session.commit()
 
         db.log_audit(
-            session, package_id, body.get("reviewer", "reviewer"), "reclassify",
+            session, package_id, body.reviewer, "reclassify",
             {"document_id": document_id, "doc_type": doc.doc_type},
         )
-        return {
-            "document_id": doc.id, "doc_type": doc.doc_type,
-            "classification_reason": doc.classification_reason, "manually_overridden": doc.manually_overridden,
-        }
+        return DocumentReclassifyResponse(
+            document_id=doc.id, doc_type=doc.doc_type,
+            classification_reason=doc.classification_reason, manually_overridden=doc.manually_overridden,
+        )
     finally:
         session.close()
 
@@ -283,14 +287,14 @@ async def get_document_page_image(package_id: str, document_id: str, page: int, 
     try:
         doc = db.get_document(session, document_id)
         if doc is None or doc.package_id != package_id:
-            raise HTTPException(status_code=404, detail="Document not found")
+            raise AppError(404, "DOCUMENT_NOT_FOUND", "Document does not exist")
     finally:
         session.close()
 
     parsed_bbox = [float(v) for v in bbox.split(",")] if bbox else None
     image_bytes = render_page(doc.path, page, parsed_bbox)
     if image_bytes is None:
-        raise HTTPException(status_code=404, detail="Page could not be rendered")
+        raise AppError(404, "PAGE_RENDER_FAILED", "Page could not be rendered")
     return Response(content=image_bytes, media_type="image/png")
 
 
