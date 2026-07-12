@@ -215,17 +215,22 @@ def log_audit(session: Session, package_id: str, actor: str, action: str, detail
 
 
 def create_document(session: Session, package_id: str, doc: dict) -> Document:
-    row = Document(
-        id=str(uuid.uuid4()),
-        package_id=package_id,
-        path=doc["path"],
-        doc_type=doc["doc_type"],
-        has_text_layer=doc["has_text_layer"],
-        scan_quality=doc.get("scan_quality"),
-        classification_reason=doc.get("classification_reason"),
-        manually_overridden=doc.get("manually_overridden", False),
+    """Idempotent on (package_id, path): reprocessing a package updates the
+    existing Document row instead of inserting a duplicate (uq_document_package_path)."""
+    row = (
+        session.query(Document)
+        .filter_by(package_id=package_id, path=doc["path"])
+        .one_or_none()
     )
-    session.add(row)
+    if row is None:
+        row = Document(id=str(uuid.uuid4()), package_id=package_id, path=doc["path"])
+        session.add(row)
+
+    row.doc_type = doc["doc_type"]
+    row.has_text_layer = doc["has_text_layer"]
+    row.scan_quality = doc.get("scan_quality")
+    row.classification_reason = doc.get("classification_reason")
+    row.manually_overridden = doc.get("manually_overridden", False)
     session.commit()
     return row
 

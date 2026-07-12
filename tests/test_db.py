@@ -166,16 +166,18 @@ def test_delete_package_cascades():
     db.create_decision(session, pkg.id, "flagged", ["bad code"])
     db.record_review_action(session, run.id, "patient_name", "approve")
 
-    deleted = db.delete_package(session, pkg.id)
+    pkg_id, doc_id, run_id = pkg.id, doc.id, run.id
+
+    deleted = db.delete_package(session, pkg_id)
     assert deleted is True
-    assert db.get_package(session, pkg.id) is None
-    assert session.query(db.Document).filter_by(package_id=pkg.id).count() == 0
-    assert session.query(db.ExtractionRun).filter_by(document_id=doc.id).count() == 0
-    assert session.query(db.ExtractedField).filter_by(extraction_run_id=run.id).count() == 0
-    assert session.query(db.ValidationFailure).filter_by(extraction_run_id=run.id).count() == 0
-    assert session.query(db.PolicyEvidence).filter_by(package_id=pkg.id).count() == 0
-    assert session.query(db.Decision).filter_by(package_id=pkg.id).count() == 0
-    assert session.query(db.ReviewAction).filter_by(extraction_run_id=run.id).count() == 0
+    assert db.get_package(session, pkg_id) is None
+    assert session.query(db.Document).filter_by(package_id=pkg_id).count() == 0
+    assert session.query(db.ExtractionRun).filter_by(document_id=doc_id).count() == 0
+    assert session.query(db.ExtractedField).filter_by(extraction_run_id=run_id).count() == 0
+    assert session.query(db.ValidationFailure).filter_by(extraction_run_id=run_id).count() == 0
+    assert session.query(db.PolicyEvidence).filter_by(package_id=pkg_id).count() == 0
+    assert session.query(db.Decision).filter_by(package_id=pkg_id).count() == 0
+    assert session.query(db.ReviewAction).filter_by(extraction_run_id=run_id).count() == 0
     assert db.delete_package(session, "does-not-exist") is False
     session.close()
 
