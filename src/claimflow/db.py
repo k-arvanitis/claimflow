@@ -7,10 +7,18 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, String, Text, create_engine
-from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, String, Text, UniqueConstraint, create_engine, event
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
 
 from claimflow.config import settings
+
+
+@event.listens_for(Engine, "connect")
+def _enable_sqlite_foreign_keys(dbapi_connection, connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
 
 
 class Base(DeclarativeBase):
@@ -21,17 +29,30 @@ class Package(Base):
     __tablename__ = "packages"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
-    status: Mapped[str] = mapped_column(String, default="queued")  # queued|processing|completed|failed
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+    status: Mapped[str] = mapped_column(String, default="queued", index=True)  # queued|processing|completed|failed
     result_json: Mapped[str | None] = mapped_column(Text, default=None)
     error: Mapped[str | None] = mapped_column(Text, default=None)
 
+    documents: Mapped[list["Document"]] = relationship(
+        back_populates="package", cascade="all, delete-orphan", passive_deletes=True
+    )
+    policy_evidence_entries: Mapped[list["PolicyEvidence"]] = relationship(
+        back_populates="package", cascade="all, delete-orphan", passive_deletes=True
+    )
+    decisions: Mapped[list["Decision"]] = relationship(
+        back_populates="package", cascade="all, delete-orphan", passive_deletes=True
+    )
+
 
 class AuditLogEntry(Base):
+    """package_id is intentionally NOT a ForeignKey: audit history must survive
+    package deletion, so it's a plain indexed string reference, not a cascade target."""
+
     __tablename__ = "audit_log"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    package_id: Mapped[str] = mapped_column(ForeignKey("packages.id"))
+    package_id: Mapped[str] = mapped_column(String, index=True)
     timestamp: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     actor: Mapped[str] = mapped_column(String)  # e.g. "api", "reviewer"
     action: Mapped[str] = mapped_column(String)  # e.g. "upload", "extract", "validate", "review_edit"
@@ -40,9 +61,10 @@ class AuditLogEntry(Base):
 
 class Document(Base):
     __tablename__ = "documents"
+    __table_args__ = (UniqueConstraint("package_id", "path", name="uq_document_package_path"),)
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
-    package_id: Mapped[str] = mapped_column(ForeignKey("packages.id"))
+    package_id: Mapped[str] = mapped_column(ForeignKey("packages.id", ondelete="CASCADE"), index=True)
     path: Mapped[str] = mapped_column(String)
     doc_type: Mapped[str] = mapped_column(String)
     has_text_layer: Mapped[bool] = mapped_column(Boolean)
@@ -51,69 +73,93 @@ class Document(Base):
     manually_overridden: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
+    package: Mapped["Package"] = relationship(back_populates="documents")
+    extraction_runs: Mapped[list["ExtractionRun"]] = relationship(
+        back_populates="document", cascade="all, delete-orphan", passive_deletes=True
+    )
+
 
 class ExtractionRun(Base):
     __tablename__ = "extraction_runs"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
-    document_id: Mapped[str] = mapped_column(ForeignKey("documents.id"))
+    document_id: Mapped[str] = mapped_column(ForeignKey("documents.id", ondelete="CASCADE"), index=True)
     schema_name: Mapped[str] = mapped_column(String)
     status: Mapped[str] = mapped_column(String)  # pass|review|error
     overall_confidence: Mapped[float] = mapped_column(Float)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    document: Mapped["Document"] = relationship(back_populates="extraction_runs")
+    extracted_fields: Mapped[list["ExtractedField"]] = relationship(
+        back_populates="extraction_run", cascade="all, delete-orphan", passive_deletes=True
+    )
+    validation_failures: Mapped[list["ValidationFailure"]] = relationship(
+        back_populates="extraction_run", cascade="all, delete-orphan", passive_deletes=True
+    )
+    review_actions: Mapped[list["ReviewAction"]] = relationship(
+        back_populates="extraction_run", cascade="all, delete-orphan", passive_deletes=True
+    )
 
 
 class ExtractedField(Base):
     __tablename__ = "extracted_fields"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    extraction_run_id: Mapped[str] = mapped_column(ForeignKey("extraction_runs.id"))
+    extraction_run_id: Mapped[str] = mapped_column(ForeignKey("extraction_runs.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String)
     value_json: Mapped[str | None] = mapped_column(Text, default=None)
     confidence: Mapped[float] = mapped_column(Float)
     grounded: Mapped[bool] = mapped_column(Boolean)
     valid: Mapped[bool] = mapped_column(Boolean)
-    field_status: Mapped[str] = mapped_column(String)
+    field_status: Mapped[str] = mapped_column(String, index=True)
     evidence_json: Mapped[str | None] = mapped_column(Text, default=None)
+
+    extraction_run: Mapped["ExtractionRun"] = relationship(back_populates="extracted_fields")
 
 
 class ValidationFailure(Base):
     __tablename__ = "validation_failures"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    extraction_run_id: Mapped[str] = mapped_column(ForeignKey("extraction_runs.id"))
+    extraction_run_id: Mapped[str] = mapped_column(ForeignKey("extraction_runs.id", ondelete="CASCADE"), index=True)
     field: Mapped[str] = mapped_column(String)
     rule: Mapped[str] = mapped_column(String)
     reason: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    extraction_run: Mapped["ExtractionRun"] = relationship(back_populates="validation_failures")
 
 
 class PolicyEvidence(Base):
     __tablename__ = "policy_evidence"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    package_id: Mapped[str] = mapped_column(ForeignKey("packages.id"))
+    package_id: Mapped[str] = mapped_column(ForeignKey("packages.id", ondelete="CASCADE"), index=True)
     question: Mapped[str] = mapped_column(Text)
     answer: Mapped[str] = mapped_column(Text)
     citations_json: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    package: Mapped["Package"] = relationship(back_populates="policy_evidence_entries")
 
 
 class Decision(Base):
     __tablename__ = "decisions"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    package_id: Mapped[str] = mapped_column(ForeignKey("packages.id"))
+    package_id: Mapped[str] = mapped_column(ForeignKey("packages.id", ondelete="CASCADE"), index=True)
     decision: Mapped[str] = mapped_column(String)  # approved|flagged|escalated
     review_reasons_json: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    package: Mapped["Package"] = relationship(back_populates="decisions")
 
 
 class ReviewAction(Base):
     __tablename__ = "review_actions"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    extraction_run_id: Mapped[str] = mapped_column(ForeignKey("extraction_runs.id"))
+    extraction_run_id: Mapped[str] = mapped_column(ForeignKey("extraction_runs.id", ondelete="CASCADE"), index=True)
     field_name: Mapped[str] = mapped_column(String)
     action: Mapped[str] = mapped_column(String)  # approve|edit|reject
     original_value_json: Mapped[str | None] = mapped_column(Text, default=None)
@@ -123,6 +169,8 @@ class ReviewAction(Base):
     reviewer: Mapped[str] = mapped_column(String, default="reviewer")
     note: Mapped[str | None] = mapped_column(Text, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    extraction_run: Mapped["ExtractionRun"] = relationship(back_populates="review_actions")
 
 
 def _make_engine():
@@ -322,36 +370,6 @@ def delete_package(session: Session, package_id: str) -> bool:
     pkg = session.get(Package, package_id)
     if pkg is None:
         return False
-
-    # ORM-level session.delete() on fetched instances (not bulk .delete()) so that
-    # instances already held by the caller (same identity-mapped objects) are marked
-    # deleted-and-expunged rather than expired; expire_on_commit would otherwise try
-    # to refresh them from rows that no longer exist and raise ObjectDeletedError.
-    documents = session.query(Document).filter_by(package_id=package_id).all()
-    if documents:
-        document_ids = [d.id for d in documents]
-        runs = session.query(ExtractionRun).filter(ExtractionRun.document_id.in_(document_ids)).all()
-        if runs:
-            run_ids = [r.id for r in runs]
-            for field in session.query(ExtractedField).filter(ExtractedField.extraction_run_id.in_(run_ids)).all():
-                session.delete(field)
-            for failure in session.query(ValidationFailure).filter(
-                ValidationFailure.extraction_run_id.in_(run_ids)
-            ).all():
-                session.delete(failure)
-            for action in session.query(ReviewAction).filter(
-                ReviewAction.extraction_run_id.in_(run_ids)
-            ).all():
-                session.delete(action)
-            for run in runs:
-                session.delete(run)
-        for doc in documents:
-            session.delete(doc)
-
-    for evidence in session.query(PolicyEvidence).filter_by(package_id=package_id).all():
-        session.delete(evidence)
-    for decision in session.query(Decision).filter_by(package_id=package_id).all():
-        session.delete(decision)
     session.delete(pkg)
     session.commit()
     return True
