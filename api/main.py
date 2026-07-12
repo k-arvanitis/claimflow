@@ -6,12 +6,14 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, UploadFile
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 
 from claimflow import db, review
 from claimflow.config import settings
 from claimflow.graph import build_graph
 from claimflow.pages import render_page
+from claimflow.schemas.errors import AppError, ErrorBody, ErrorEnvelope
 from claimflow.tracing import get_callback
 
 logger = logging.getLogger(__name__)
@@ -29,10 +31,45 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="ClaimFlow", version="0.1.0", lifespan=lifespan)
 
 
+@app.exception_handler(AppError)
+async def _app_error_handler(request, exc: AppError):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=ErrorEnvelope(
+            error=ErrorBody(code=exc.code, message=exc.detail, details=exc.details)
+        ).model_dump(),
+    )
+
+
+@app.exception_handler(HTTPException)
+async def _http_exception_handler(request, exc: HTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=ErrorEnvelope(
+            error=ErrorBody(code="HTTP_ERROR", message=str(exc.detail), details=None)
+        ).model_dump(),
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_error_handler(request, exc: RequestValidationError):
+    return JSONResponse(
+        status_code=422,
+        content=ErrorEnvelope(
+            error=ErrorBody(code="VALIDATION_ERROR", message="Request validation failed", details=exc.errors())
+        ).model_dump(),
+    )
+
+
 @app.exception_handler(Exception)
 async def _generic_handler(request, exc):
     logger.error("Unhandled error: %s", exc, exc_info=True)
-    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+    return JSONResponse(
+        status_code=500,
+        content=ErrorEnvelope(
+            error=ErrorBody(code="INTERNAL_ERROR", message="Internal server error", details=None)
+        ).model_dump(),
+    )
 
 
 @app.get("/health")
@@ -117,7 +154,7 @@ async def get_package(package_id: str):
     try:
         pkg = db.get_package(session, package_id)
         if pkg is None:
-            raise HTTPException(status_code=404, detail="Package not found")
+            raise AppError(404, "PACKAGE_NOT_FOUND", "Package does not exist")
         return {
             "package_id": pkg.id,
             "status": pkg.status,
@@ -134,7 +171,7 @@ async def delete_package(package_id: str):
     try:
         deleted = db.delete_package(session, package_id)
         if not deleted:
-            raise HTTPException(status_code=404, detail="Package not found")
+            raise AppError(404, "PACKAGE_NOT_FOUND", "Package does not exist")
     finally:
         session.close()
 
@@ -149,7 +186,7 @@ async def process_package(package_id: str, background_tasks: BackgroundTasks):
     try:
         pkg = db.get_package(session, package_id)
         if pkg is None:
-            raise HTTPException(status_code=404, detail="Package not found")
+            raise AppError(404, "PACKAGE_NOT_FOUND", "Package does not exist")
         overrides = {
             Path(doc.path).name: doc.doc_type
             for doc in db.list_documents(session, package_id)
@@ -169,7 +206,7 @@ async def get_package_status(package_id: str):
     try:
         pkg = db.get_package(session, package_id)
         if pkg is None:
-            raise HTTPException(status_code=404, detail="Package not found")
+            raise AppError(404, "PACKAGE_NOT_FOUND", "Package does not exist")
         return {"package_id": pkg.id, "status": pkg.status}
     finally:
         session.close()
@@ -289,7 +326,7 @@ async def get_package_review(package_id: str):
     try:
         pkg = db.get_package(session, package_id)
         if pkg is None:
-            raise HTTPException(status_code=404, detail="Package not found")
+            raise AppError(404, "PACKAGE_NOT_FOUND", "Package does not exist")
 
         run = db.latest_extraction_run_for_package(session, package_id)
         fields = db.list_extracted_fields_for_run(session, run.id) if run else []
@@ -353,7 +390,7 @@ async def rerun_package_validation(package_id: str, body: dict):
     try:
         pkg = db.get_package(session, package_id)
         if pkg is None:
-            raise HTTPException(status_code=404, detail="Package not found")
+            raise AppError(404, "PACKAGE_NOT_FOUND", "Package does not exist")
         result = json.loads(pkg.result_json) if pkg.result_json else {}
     finally:
         session.close()
@@ -371,7 +408,7 @@ async def submit_package_decision(package_id: str, body: dict):
     try:
         pkg = db.get_package(session, package_id)
         if pkg is None:
-            raise HTTPException(status_code=404, detail="Package not found")
+            raise AppError(404, "PACKAGE_NOT_FOUND", "Package does not exist")
         decision = db.create_decision(session, package_id, body["decision"], body.get("review_reasons") or [])
         db.log_audit(session, package_id, "reviewer", "decision", {"decision": decision.decision})
         return {"package_id": package_id, "decision": decision.decision}
@@ -415,7 +452,7 @@ async def export_package(package_id: str):
     try:
         pkg = db.get_package(session, package_id)
         if pkg is None:
-            raise HTTPException(status_code=404, detail="Package not found")
+            raise AppError(404, "PACKAGE_NOT_FOUND", "Package does not exist")
         result = json.loads(pkg.result_json) if pkg.result_json else {}
         return {
             "package_id": package_id,
