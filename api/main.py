@@ -23,6 +23,13 @@ from claimflow.schemas.packages import (
     PackageStatusResponse,
     PackageSummary,
 )
+from claimflow.schemas.reporting import (
+    AuditEventItem,
+    ExportResponse,
+    ExtractionFieldExport,
+    PolicyAnswerExport,
+    PolicyEvidenceItem,
+)
 from claimflow.schemas.review_read import (
     FieldEvidenceResponse,
     PackageReviewResponse,
@@ -445,37 +452,37 @@ async def submit_package_decision(package_id: str, body: DecisionRequest):
         session.close()
 
 
-@app.get("/packages/{package_id}/policy-evidence")
+@app.get("/packages/{package_id}/policy-evidence", response_model=list[PolicyEvidenceItem])
 async def get_policy_evidence(package_id: str):
     session = db.SessionLocal()
     try:
         return [
-            {
-                "question": pe.question, "answer": pe.answer,
-                "citations": json.loads(pe.citations_json),
-            }
+            PolicyEvidenceItem(
+                question=pe.question, answer=pe.answer,
+                citations=json.loads(pe.citations_json),
+            )
             for pe in db.list_policy_evidence_for_package(session, package_id)
         ]
     finally:
         session.close()
 
 
-@app.get("/packages/{package_id}/audit")
+@app.get("/packages/{package_id}/audit", response_model=list[AuditEventItem])
 async def get_audit_trail(package_id: str):
     session = db.SessionLocal()
     try:
         return [
-            {
-                "actor": entry.actor, "action": entry.action, "timestamp": entry.timestamp.isoformat(),
-                "detail": json.loads(entry.detail_json) if entry.detail_json else None,
-            }
+            AuditEventItem(
+                actor=entry.actor, action=entry.action, timestamp=entry.timestamp,
+                detail=json.loads(entry.detail_json) if entry.detail_json else None,
+            )
             for entry in db.list_audit_events_for_package(session, package_id)
         ]
     finally:
         session.close()
 
 
-@app.get("/packages/{package_id}/export")
+@app.get("/packages/{package_id}/export", response_model=ExportResponse)
 async def export_package(package_id: str):
     session = db.SessionLocal()
     try:
@@ -483,14 +490,18 @@ async def export_package(package_id: str):
         if pkg is None:
             raise AppError(404, "PACKAGE_NOT_FOUND", "Package does not exist")
         result = json.loads(pkg.result_json) if pkg.result_json else {}
-        return {
-            "package_id": package_id,
-            "status": pkg.status,
-            "decision": result.get("decision"),
-            "domain": result.get("domain"),
-            "extraction_fields": result.get("extraction_fields", []),
-            "validation_failures": result.get("validation_failures", []),
-            "policy_answers": result.get("policy_answers", []),
-        }
+        return ExportResponse(
+            package_id=package_id,
+            status=pkg.status,
+            decision=result.get("decision"),
+            domain=result.get("domain"),
+            extraction_fields=[
+                ExtractionFieldExport(**f) for f in result.get("extraction_fields", [])
+            ],
+            validation_failures=result.get("validation_failures", []),
+            policy_answers=[
+                PolicyAnswerExport(**a) for a in result.get("policy_answers", [])
+            ],
+        )
     finally:
         session.close()
