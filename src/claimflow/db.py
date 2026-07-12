@@ -223,14 +223,14 @@ def create_document(session: Session, package_id: str, doc: dict) -> Document:
         .one_or_none()
     )
     if row is None:
-        row = Document(id=str(uuid.uuid4()), package_id=package_id, path=doc["path"])
+        row = Document(id=str(uuid.uuid4()), package_id=package_id, path=doc["path"], manually_overridden=False)
         session.add(row)
 
     row.doc_type = doc["doc_type"]
     row.has_text_layer = doc["has_text_layer"]
     row.scan_quality = doc.get("scan_quality")
     row.classification_reason = doc.get("classification_reason")
-    row.manually_overridden = doc.get("manually_overridden", False)
+    row.manually_overridden = doc.get("manually_overridden", row.manually_overridden)
     session.commit()
     return row
 

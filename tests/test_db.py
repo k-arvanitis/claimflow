@@ -242,3 +242,22 @@ def test_create_document_persists_classification_reason():
     })
     assert overridden.manually_overridden is True
     session.close()
+
+
+def test_create_document_preserves_manually_overridden_on_reprocess():
+    session = _make_session()
+    pkg = db.create_package(session, str(uuid.uuid4()))
+    doc = db.create_document(session, pkg.id, {
+        "path": "/tmp/claim.pdf", "doc_type": "eob", "has_text_layer": True,
+        "scan_quality": None, "classification_reason": "manual override", "manually_overridden": True,
+    })
+    assert doc.manually_overridden is True
+
+    # simulate a second reprocess: ingest's dict never carries manually_overridden
+    reprocessed = db.create_document(session, pkg.id, {
+        "path": "/tmp/claim.pdf", "doc_type": "eob", "has_text_layer": True,
+        "scan_quality": None, "classification_reason": "manual override",
+    })
+    assert reprocessed.id == doc.id
+    assert reprocessed.manually_overridden is True
+    session.close()
