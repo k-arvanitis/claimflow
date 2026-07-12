@@ -29,6 +29,15 @@ from claimflow.schemas.review_read import (
     ReviewFieldSummary,
     ReviewValidationFailure,
 )
+from claimflow.schemas.review_write import (
+    DecisionRequest,
+    DecisionResponse,
+    FieldReviewRequest,
+    FieldReviewResponse,
+    ValidationFailureItem,
+    ValidationRerunRequest,
+    ValidationRerunResponse,
+)
 from claimflow.tracing import get_callback
 
 logger = logging.getLogger(__name__)
@@ -369,41 +378,41 @@ async def get_package_review(package_id: str):
         session.close()
 
 
-@app.post("/packages/{package_id}/fields/{field_id}/review")
-async def submit_field_review(package_id: str, field_id: int, body: dict):
+@app.post("/packages/{package_id}/fields/{field_id}/review", response_model=FieldReviewResponse)
+async def submit_field_review(package_id: str, field_id: int, body: FieldReviewRequest):
     session = db.SessionLocal()
     try:
         field = db.get_extracted_field(session, field_id)
         if field is None:
-            raise HTTPException(status_code=404, detail="Field not found")
+            raise AppError(404, "FIELD_NOT_FOUND", "Field does not exist")
         run = session.get(db.ExtractionRun, field.extraction_run_id)
         doc = session.get(db.Document, run.document_id) if run else None
         if doc is None or doc.package_id != package_id:
-            raise HTTPException(status_code=404, detail="Field not found")
+            raise AppError(404, "FIELD_NOT_FOUND", "Field does not exist")
 
         failures_before = db.list_validation_failures_for_run(session, run.id)
         validation_before = [f.reason for f in failures_before if f.field == field.name]
 
         action = db.record_review_action(
-            session, run.id, field.name, body["action"],
+            session, run.id, field.name, body.action.value,
             original_value=json.loads(field.value_json) if field.value_json else None,
-            corrected_value=body.get("corrected_value"),
+            corrected_value=body.corrected_value,
             validation_before=validation_before,
-            validation_after=body.get("validation_after"),
-            reviewer=body.get("reviewer", "reviewer"),
-            note=body.get("note"),
+            validation_after=body.validation_after,
+            reviewer=body.reviewer,
+            note=body.note,
         )
         db.log_audit(session, package_id, action.reviewer, "review_edit", {"field": field.name, "action": action.action})
-        return {
-            "field_id": field_id, "action": action.action, "reviewer": action.reviewer,
-            "corrected_value": json.loads(action.corrected_value_json) if action.corrected_value_json else None,
-        }
+        return FieldReviewResponse(
+            field_id=field_id, action=action.action, reviewer=action.reviewer,
+            corrected_value=json.loads(action.corrected_value_json) if action.corrected_value_json else None,
+        )
     finally:
         session.close()
 
 
-@app.post("/packages/{package_id}/validation/re-run")
-async def rerun_package_validation(package_id: str, body: dict):
+@app.post("/packages/{package_id}/validation/re-run", response_model=ValidationRerunResponse)
+async def rerun_package_validation(package_id: str, body: ValidationRerunRequest):
     session = db.SessionLocal()
     try:
         pkg = db.get_package(session, package_id)
@@ -415,21 +424,23 @@ async def rerun_package_validation(package_id: str, body: dict):
 
     domain = result.get("domain")
     merged = dict(result.get("extraction_data") or {})
-    merged.update(body.get("corrected_fields") or {})
+    merged.update(body.corrected_fields)
     failures = review.rerun_validation(domain, merged)
-    return {"validation_failures": [dict(f) for f in failures]}
+    return ValidationRerunResponse(
+        validation_failures=[ValidationFailureItem(field=f["field"], rule=f["rule"], reason=f["reason"]) for f in failures]
+    )
 
 
-@app.post("/packages/{package_id}/decision")
-async def submit_package_decision(package_id: str, body: dict):
+@app.post("/packages/{package_id}/decision", response_model=DecisionResponse)
+async def submit_package_decision(package_id: str, body: DecisionRequest):
     session = db.SessionLocal()
     try:
         pkg = db.get_package(session, package_id)
         if pkg is None:
             raise AppError(404, "PACKAGE_NOT_FOUND", "Package does not exist")
-        decision = db.create_decision(session, package_id, body["decision"], body.get("review_reasons") or [])
+        decision = db.create_decision(session, package_id, body.decision.value, body.review_reasons)
         db.log_audit(session, package_id, "reviewer", "decision", {"decision": decision.decision})
-        return {"package_id": package_id, "decision": decision.decision}
+        return DecisionResponse(package_id=package_id, decision=decision.decision)
     finally:
         session.close()
 
