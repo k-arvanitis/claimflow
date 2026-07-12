@@ -150,12 +150,22 @@ def test_run_claim_classifies_flagged_decision_as_review_ready(tmp_path):
     assert pkg.status == "review_ready"
 
 
-def test_classify_exception_retrieval_error_when_validation_not_reached():
+def test_classify_exception_retrieval_error_when_retrieve_should_have_run():
+    graph = MagicMock()
+    graph.get_state.return_value = MagicMock(
+        values={"validation_failures": [{"field": "f", "rule": "r", "reason": "x"}], "extraction_data": {"a": 1}}
+    )
+    assert _classify_exception(graph, {}) == "retrieval_error"
+
+
+def test_classify_exception_processing_error_when_validation_passed_and_review_crashed():
+    # validation_failures == [] means _should_retrieve routed straight to "review",
+    # skipping retrieve entirely -- a crash after this point is not a retrieval_error.
     graph = MagicMock()
     graph.get_state.return_value = MagicMock(
         values={"validation_failures": [], "extraction_data": {"a": 1}}
     )
-    assert _classify_exception(graph, {}) == "retrieval_error"
+    assert _classify_exception(graph, {}) == "processing_error"
 
 
 def test_classify_exception_validation_error_when_extraction_done_but_no_validation():
@@ -176,3 +186,50 @@ def test_classify_exception_processing_error_when_get_state_raises():
     graph = MagicMock()
     graph.get_state.side_effect = RuntimeError("no checkpoint")
     assert _classify_exception(graph, {}) == "processing_error"
+
+
+def test_classify_exception_against_real_graph_state(monkeypatch):
+    """Build a real compiled graph (real MemorySaver checkpointer), crash a real
+    node, and confirm get_state(config).values genuinely omits unwritten channels
+    (rather than holding them as None) -- the assumption _classify_exception relies on."""
+    import claimflow.graph as graph_module
+
+    def fake_ingest(state):
+        return {
+            "documents": [{
+                "path": "x.pdf", "doc_type": "cms1500", "has_text_layer": True,
+                "scan_quality": None, "classification_reason": "test",
+            }],
+            "domain": "cms1500", "ocr_log": [],
+        }
+
+    def fake_extract(state):
+        return {
+            "extraction_data": {"field": "value"}, "extraction_fields": [],
+            "extraction_status": "pass", "extraction_overall_confidence": 0.9,
+        }
+
+    def fake_validate(state):
+        return {"validation_failures": [{"field": "f", "rule": "r", "reason": "simulated failure"}]}
+
+    def crashing_retrieve(state):
+        raise RuntimeError("simulated retrieval crash")
+
+    monkeypatch.setattr(graph_module, "ingest_node", fake_ingest)
+    monkeypatch.setattr(graph_module, "extract_node", fake_extract)
+    monkeypatch.setattr(graph_module, "validate_node", fake_validate)
+    monkeypatch.setattr(graph_module, "retrieve_node", crashing_retrieve)
+
+    graph = graph_module.build_graph()
+    config = {"configurable": {"thread_id": "test-real-graph-thread"}}
+
+    with pytest.raises(RuntimeError, match="simulated retrieval crash"):
+        graph.invoke({"package_dir": "unused", "domain": None, "doc_type_overrides": {}}, config=config)
+
+    values = graph.get_state(config).values
+
+    # Empirical confirmation: retrieve's output channel is absent, not None.
+    assert "policy_answers" not in values
+    assert values["validation_failures"] == [{"field": "f", "rule": "r", "reason": "simulated failure"}]
+
+    assert _classify_exception(graph, config) == "retrieval_error"

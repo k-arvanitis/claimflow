@@ -115,17 +115,33 @@ def _classify_exception(graph, config) -> str:
     Qdrant/LLM calls) or an unexpected crash elsewhere — ingest_node and
     extract_node catch their own errors and return them as state instead of
     raising. Inspect the checkpointer's last-known state for this run to see
-    which node was reached, and classify accordingly."""
+    which node was reached, and classify accordingly.
+
+    `validation_failures` presence alone doesn't imply retrieve ran: per
+    `_should_retrieve` in graph.py, the graph only routes validate -> retrieve
+    when validation_failures is non-empty; an empty list means validate
+    completed and correctly skipped straight to review. So we must check
+    validation_failures truthiness, not just whether policy_answers is
+    missing, to avoid misclassifying a post-validate crash (e.g. inside
+    review_node) as a retrieval_error when retrieve was never even scheduled.
+    """
     try:
         state = graph.get_state(config)
         values = state.values or {}
     except Exception:
         return "processing_error"
 
-    if values.get("validation_failures") is not None and "policy_answers" not in values:
+    validation_failures = values.get("validation_failures")
+    if validation_failures is None:
+        # validate never returned a result.
+        if values.get("extraction_data") is not None:
+            return "validation_error"
+        return "processing_error"
+
+    if validation_failures and "policy_answers" not in values:
+        # _should_retrieve would have routed here to "retrieve"; it never completed.
         return "retrieval_error"
-    if values.get("extraction_data") is not None and values.get("validation_failures") is None:
-        return "validation_error"
+
     return "processing_error"
 
 
