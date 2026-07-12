@@ -61,6 +61,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="ClaimFlow", version="0.1.0", lifespan=lifespan)
 
+ERROR_RESPONSES = {404: {"model": ErrorEnvelope}, 422: {"model": ErrorEnvelope}, 500: {"model": ErrorEnvelope}}
+
 
 @app.exception_handler(AppError)
 async def _app_error_handler(request, exc: AppError):
@@ -146,7 +148,13 @@ def _run_claim(graph, package_id: str, pkg_dir: Path, doc_type_overrides: dict[s
         session.close()
 
 
-@app.post("/packages", response_model=PackageCreateResponse)
+@app.post(
+    "/packages",
+    response_model=PackageCreateResponse,
+    tags=["packages"],
+    summary="Upload documents and create a new claim package",
+    responses=ERROR_RESPONSES,
+)
 async def create_package(files: list[UploadFile], background_tasks: BackgroundTasks):
     package_id = str(uuid.uuid4())
     pkg_dir = Path(settings.storage_dir) / package_id
@@ -167,7 +175,12 @@ async def create_package(files: list[UploadFile], background_tasks: BackgroundTa
     return PackageCreateResponse(package_id=package_id, status=PackageStatus.QUEUED)
 
 
-@app.get("/packages", response_model=list[PackageSummary])
+@app.get(
+    "/packages",
+    response_model=list[PackageSummary],
+    tags=["packages"],
+    responses=ERROR_RESPONSES,
+)
 async def list_packages():
     session = db.SessionLocal()
     try:
@@ -179,7 +192,12 @@ async def list_packages():
         session.close()
 
 
-@app.get("/packages/{package_id}", response_model=PackageDetailResponse)
+@app.get(
+    "/packages/{package_id}",
+    response_model=PackageDetailResponse,
+    tags=["packages"],
+    responses=ERROR_RESPONSES,
+)
 async def get_package(package_id: str):
     session = db.SessionLocal()
     try:
@@ -196,7 +214,12 @@ async def get_package(package_id: str):
         session.close()
 
 
-@app.delete("/packages/{package_id}", response_model=PackageDeleteResponse)
+@app.delete(
+    "/packages/{package_id}",
+    response_model=PackageDeleteResponse,
+    tags=["packages"],
+    responses=ERROR_RESPONSES,
+)
 async def delete_package(package_id: str):
     session = db.SessionLocal()
     try:
@@ -211,7 +234,13 @@ async def delete_package(package_id: str):
     return PackageDeleteResponse(package_id=package_id, status="deleted")
 
 
-@app.post("/packages/{package_id}/process", response_model=PackageCreateResponse)
+@app.post(
+    "/packages/{package_id}/process",
+    response_model=PackageCreateResponse,
+    tags=["packages"],
+    summary="Re-run extraction and validation for an existing package",
+    responses=ERROR_RESPONSES,
+)
 async def process_package(package_id: str, background_tasks: BackgroundTasks):
     session = db.SessionLocal()
     try:
@@ -231,7 +260,12 @@ async def process_package(package_id: str, background_tasks: BackgroundTasks):
     return PackageCreateResponse(package_id=package_id, status=PackageStatus.QUEUED)
 
 
-@app.get("/packages/{package_id}/status", response_model=PackageStatusResponse)
+@app.get(
+    "/packages/{package_id}/status",
+    response_model=PackageStatusResponse,
+    tags=["packages"],
+    responses=ERROR_RESPONSES,
+)
 async def get_package_status(package_id: str):
     session = db.SessionLocal()
     try:
@@ -243,7 +277,12 @@ async def get_package_status(package_id: str):
         session.close()
 
 
-@app.get("/packages/{package_id}/documents", response_model=list[DocumentSummary])
+@app.get(
+    "/packages/{package_id}/documents",
+    response_model=list[DocumentSummary],
+    tags=["documents"],
+    responses=ERROR_RESPONSES,
+)
 async def list_package_documents(package_id: str):
     session = db.SessionLocal()
     try:
@@ -259,7 +298,12 @@ async def list_package_documents(package_id: str):
         session.close()
 
 
-@app.get("/packages/{package_id}/documents/{document_id}", response_model=DocumentSummary)
+@app.get(
+    "/packages/{package_id}/documents/{document_id}",
+    response_model=DocumentSummary,
+    tags=["documents"],
+    responses=ERROR_RESPONSES,
+)
 async def get_package_document(package_id: str, document_id: str):
     session = db.SessionLocal()
     try:
@@ -278,6 +322,8 @@ async def get_package_document(package_id: str, document_id: str):
 @app.post(
     "/packages/{package_id}/documents/{document_id}/reclassify",
     response_model=DocumentReclassifyResponse,
+    tags=["documents"],
+    responses=ERROR_RESPONSES,
 )
 async def reclassify_document(package_id: str, document_id: str, body: DocumentReclassifyRequest):
     session = db.SessionLocal()
@@ -303,7 +349,11 @@ async def reclassify_document(package_id: str, document_id: str, body: DocumentR
         session.close()
 
 
-@app.get("/packages/{package_id}/documents/{document_id}/pages/{page}")
+@app.get(
+    "/packages/{package_id}/documents/{document_id}/pages/{page}",
+    tags=["documents"],
+    responses=ERROR_RESPONSES,
+)
 async def get_document_page_image(package_id: str, document_id: str, page: int, bbox: str | None = None):
     session = db.SessionLocal()
     try:
@@ -320,7 +370,12 @@ async def get_document_page_image(package_id: str, document_id: str, page: int, 
     return Response(content=image_bytes, media_type="image/png")
 
 
-@app.get("/packages/{package_id}/fields/{field_id}/evidence", response_model=FieldEvidenceResponse)
+@app.get(
+    "/packages/{package_id}/fields/{field_id}/evidence",
+    response_model=FieldEvidenceResponse,
+    tags=["review"],
+    responses=ERROR_RESPONSES,
+)
 async def get_field_evidence(package_id: str, field_id: int):
     session = db.SessionLocal()
     try:
@@ -342,7 +397,12 @@ async def get_field_evidence(package_id: str, field_id: int):
         session.close()
 
 
-@app.get("/reviews/queue", response_model=list[PackageSummary])
+@app.get(
+    "/reviews/queue",
+    response_model=list[PackageSummary],
+    tags=["review"],
+    responses=ERROR_RESPONSES,
+)
 async def reviews_queue():
     session = db.SessionLocal()
     try:
@@ -354,7 +414,13 @@ async def reviews_queue():
         session.close()
 
 
-@app.get("/packages/{package_id}/review", response_model=PackageReviewResponse)
+@app.get(
+    "/packages/{package_id}/review",
+    response_model=PackageReviewResponse,
+    tags=["review"],
+    summary="Get extracted fields and validation failures for reviewer queue",
+    responses=ERROR_RESPONSES,
+)
 async def get_package_review(package_id: str):
     session = db.SessionLocal()
     try:
@@ -385,7 +451,13 @@ async def get_package_review(package_id: str):
         session.close()
 
 
-@app.post("/packages/{package_id}/fields/{field_id}/review", response_model=FieldReviewResponse)
+@app.post(
+    "/packages/{package_id}/fields/{field_id}/review",
+    response_model=FieldReviewResponse,
+    tags=["review"],
+    summary="Record a reviewer's approval or correction for a single field",
+    responses=ERROR_RESPONSES,
+)
 async def submit_field_review(package_id: str, field_id: int, body: FieldReviewRequest):
     session = db.SessionLocal()
     try:
@@ -418,7 +490,12 @@ async def submit_field_review(package_id: str, field_id: int, body: FieldReviewR
         session.close()
 
 
-@app.post("/packages/{package_id}/validation/re-run", response_model=ValidationRerunResponse)
+@app.post(
+    "/packages/{package_id}/validation/re-run",
+    response_model=ValidationRerunResponse,
+    tags=["review"],
+    responses=ERROR_RESPONSES,
+)
 async def rerun_package_validation(package_id: str, body: ValidationRerunRequest):
     session = db.SessionLocal()
     try:
@@ -438,7 +515,13 @@ async def rerun_package_validation(package_id: str, body: ValidationRerunRequest
     )
 
 
-@app.post("/packages/{package_id}/decision", response_model=DecisionResponse)
+@app.post(
+    "/packages/{package_id}/decision",
+    response_model=DecisionResponse,
+    tags=["review"],
+    summary="Submit the final approve/deny decision for a package",
+    responses=ERROR_RESPONSES,
+)
 async def submit_package_decision(package_id: str, body: DecisionRequest):
     session = db.SessionLocal()
     try:
@@ -452,7 +535,12 @@ async def submit_package_decision(package_id: str, body: DecisionRequest):
         session.close()
 
 
-@app.get("/packages/{package_id}/policy-evidence", response_model=list[PolicyEvidenceItem])
+@app.get(
+    "/packages/{package_id}/policy-evidence",
+    response_model=list[PolicyEvidenceItem],
+    tags=["reporting"],
+    responses=ERROR_RESPONSES,
+)
 async def get_policy_evidence(package_id: str):
     session = db.SessionLocal()
     try:
@@ -467,7 +555,12 @@ async def get_policy_evidence(package_id: str):
         session.close()
 
 
-@app.get("/packages/{package_id}/audit", response_model=list[AuditEventItem])
+@app.get(
+    "/packages/{package_id}/audit",
+    response_model=list[AuditEventItem],
+    tags=["reporting"],
+    responses=ERROR_RESPONSES,
+)
 async def get_audit_trail(package_id: str):
     session = db.SessionLocal()
     try:
@@ -482,7 +575,13 @@ async def get_audit_trail(package_id: str):
         session.close()
 
 
-@app.get("/packages/{package_id}/export", response_model=ExportResponse)
+@app.get(
+    "/packages/{package_id}/export",
+    response_model=ExportResponse,
+    tags=["reporting"],
+    summary="Export the full claim result: decision, fields, and policy evidence",
+    responses=ERROR_RESPONSES,
+)
 async def export_package(package_id: str):
     session = db.SessionLocal()
     try:
