@@ -336,7 +336,7 @@ Every downloaded artifact is tracked in `eval/real_public/manifest.json` — sou
 ## Known limitations
 
 - **No real private claim-package evaluation yet.** The controlled end-to-end package eval uses synthetic generated packages with gold-labeled injected errors. The real/public eval layer uses public structured datasets, official blank templates, and a small number of public estimate PDFs for validation realism and selected extraction case studies — not private patient, claimant, or borrower packages.
-- **No production HIPAA compliance.** No PHI-specific access control, audit logging, encryption at rest, or retention policy — don't point this at real patient/claimant data as-is.
+- **No production HIPAA compliance.** ClaimFlow records application-level workflow audit events (`GET /packages/{id}/audit`), but does not yet provide compliance-grade, tamper-evident audit logging, PHI-specific access auditing, encryption at rest, or a retention policy — don't point this at real patient/claimant data as-is.
 - **No production auth/RBAC.** The API and Streamlit UI have no authentication — anyone who can reach the port can submit and review claims.
 - **MedCaseFlow is not implemented.** Medical/legal case-file intelligence (timeline reconstruction, contradiction detection, missing-evidence detection) is a separate, not-yet-built idea.
 - **Scan quality is a heuristic, not real OCR confidence** — a character-density proxy computed by ClaimFlow over the text doc-intel returns; doc-intel's OCR backends don't expose true per-word confidence (see [OCR proof](#ocr-proof)).
@@ -351,7 +351,7 @@ Every downloaded artifact is tracked in `eval/real_public/manifest.json` — sou
 Before using ClaimFlow with real regulated data, the following are required:
 
 - authentication and RBAC
-- audit logs
+- compliance-grade immutable audit logging, access-event capture and retention controls
 - encryption at rest / secure object storage
 - PHI/PII retention and deletion policy
 - per-row confidence and evidence for nested/list fields
