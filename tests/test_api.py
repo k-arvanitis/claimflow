@@ -88,7 +88,7 @@ def test_get_packages_lists_all():
         with patch("api.main.build_graph", return_value=MagicMock()):
             response = client.get("/packages")
     assert response.status_code == 200
-    assert isinstance(response.json(), list)
+    assert isinstance(response.json()["items"], list)
 
 
 def test_get_package_404_for_unknown_id():
@@ -264,7 +264,7 @@ def test_reviews_queue_lists_flagged_packages():
             queue_response = client.get("/reviews/queue")
 
     assert queue_response.status_code == 200
-    queue_ids = {item["package_id"] for item in queue_response.json()}
+    queue_ids = {item["package_id"] for item in queue_response.json()["items"]}
     assert package_id in queue_ids
 
 

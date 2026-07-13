@@ -7,7 +7,7 @@ def test_list_packages_response_shape():
     with TestClient(app) as client:
         resp = client.get("/packages")
     assert resp.status_code == 200
-    assert resp.json() == []
+    assert resp.json()["items"] == []
 
 
 def test_package_status_field_is_enum_value():

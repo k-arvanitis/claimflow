@@ -62,4 +62,4 @@ def test_reviews_queue_shape():
     with TestClient(app) as client:
         resp = client.get("/reviews/queue")
     assert resp.status_code == 200
-    assert resp.json() == []
+    assert resp.json()["items"] == []

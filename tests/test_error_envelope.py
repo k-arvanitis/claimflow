@@ -27,7 +27,7 @@ def test_500_uses_error_envelope(monkeypatch):
     def _boom(*a, **kw):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(db, "list_packages", _boom)
+    monkeypatch.setattr(db, "list_packages_filtered", _boom)
     with TestClient(app, raise_server_exceptions=False) as client:
         resp = client.get("/packages")
     assert resp.status_code == 500

@@ -3,9 +3,10 @@ import logging
 import shutil
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 
@@ -17,6 +18,7 @@ from claimflow.pages import render_page
 from claimflow.schemas.documents import DocumentReclassifyRequest, DocumentReclassifyResponse, DocumentSummary
 from claimflow.schemas.enums import PackageStatus
 from claimflow.schemas.errors import AppError, ErrorBody, ErrorEnvelope
+from claimflow.schemas.pagination import PaginatedPackagesResponse
 from claimflow.schemas.packages import (
     PackageCreateResponse,
     PackageDeleteResponse,
@@ -225,17 +227,36 @@ async def create_package(files: list[UploadFile], background_tasks: BackgroundTa
 
 @app.get(
     "/packages",
-    response_model=list[PackageSummary],
+    response_model=PaginatedPackagesResponse,
     tags=["packages"],
     responses=ERROR_RESPONSES,
 )
-async def list_packages():
+async def list_packages(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1),
+    status: str | None = None,
+    domain: str | None = None,
+    decision: str | None = None,
+    confidence_min: float | None = None,
+    confidence_max: float | None = None,
+    validation_rule: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    search: str | None = None,
+    sort: str = "-created_at",
+):
     session = db.SessionLocal()
     try:
-        return [
-            PackageSummary(package_id=pkg.id, status=pkg.status, created_at=pkg.created_at)
-            for pkg in db.list_packages(session)
-        ]
+        rows, total = db.list_packages_filtered(
+            session, status=status, domain=domain, decision=decision,
+            confidence_min=confidence_min, confidence_max=confidence_max,
+            validation_rule=validation_rule, date_from=date_from, date_to=date_to,
+            search=search, sort=sort, page=page, page_size=page_size,
+        )
+        return PaginatedPackagesResponse(
+            items=[PackageSummary(package_id=pkg.id, status=pkg.status, created_at=pkg.created_at) for pkg in rows],
+            page=page, page_size=min(page_size, db.MAX_PAGE_SIZE), total=total,
+        )
     finally:
         session.close()
 
@@ -472,17 +493,36 @@ async def get_field_evidence(package_id: str, field_id: int):
 
 @app.get(
     "/reviews/queue",
-    response_model=list[PackageSummary],
+    response_model=PaginatedPackagesResponse,
     tags=["review"],
     responses=ERROR_RESPONSES,
 )
-async def reviews_queue():
+async def reviews_queue(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1),
+    status: str | None = None,
+    domain: str | None = None,
+    decision: str | None = None,
+    confidence_min: float | None = None,
+    confidence_max: float | None = None,
+    validation_rule: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    search: str | None = None,
+    sort: str = "-created_at",
+):
     session = db.SessionLocal()
     try:
-        return [
-            PackageSummary(package_id=pkg.id, status=pkg.status, created_at=pkg.created_at)
-            for pkg in db.list_flagged_packages(session)
-        ]
+        rows, total = db.list_packages_filtered(
+            session, status=status or "review_ready", domain=domain, decision=decision,
+            confidence_min=confidence_min, confidence_max=confidence_max,
+            validation_rule=validation_rule, date_from=date_from, date_to=date_to,
+            search=search, sort=sort, page=page, page_size=page_size,
+        )
+        return PaginatedPackagesResponse(
+            items=[PackageSummary(package_id=pkg.id, status=pkg.status, created_at=pkg.created_at) for pkg in rows],
+            page=page, page_size=min(page_size, db.MAX_PAGE_SIZE), total=total,
+        )
     finally:
         session.close()
 

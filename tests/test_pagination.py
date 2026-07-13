@@ -1,9 +1,12 @@
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from api.main import app
 from claimflow import db
 
 
@@ -117,3 +120,43 @@ def test_page_size_clamped_to_max(session):
 
     rows, total = db.list_packages_filtered(session, page_size=99999)
     assert len(rows) == 3  # clamped, not rejected, just bounded by actual data here
+
+
+def test_list_packages_endpoint_paginates(monkeypatch):
+    with TestClient(app) as client:
+        for _ in range(3):
+            create = client.post("/packages", files={"files": ("a.pdf", b"%PDF-1.4", "application/pdf")})
+        resp = client.get("/packages?page=1&page_size=2")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert set(body.keys()) == {"items", "page", "page_size", "total"}
+    assert body["page"] == 1
+    assert body["page_size"] == 2
+    assert body["total"] >= 3
+    assert len(body["items"]) == 2
+
+
+def test_reviews_queue_defaults_to_review_ready_status(monkeypatch):
+    with TestClient(app) as client:
+        create = client.post("/packages", files={"files": ("a.pdf", b"%PDF-1.4", "application/pdf")})
+        package_id = create.json()["package_id"]
+
+        session = db.SessionLocal()
+        db.transition_package_status(session, package_id, "review_ready", reason="test setup")
+        session.close()
+
+        resp = client.get("/reviews/queue")
+
+    body = resp.json()
+    assert any(item["package_id"] == package_id for item in body["items"])
+
+
+def test_reviews_queue_explicit_status_overrides_default(monkeypatch):
+    with patch("api.main._run_claim"), TestClient(app) as client:
+        create = client.post("/packages", files={"files": ("a.pdf", b"%PDF-1.4", "application/pdf")})
+        package_id = create.json()["package_id"]
+        resp = client.get("/reviews/queue?status=queued")
+
+    body = resp.json()
+    assert any(item["package_id"] == package_id for item in body["items"])
