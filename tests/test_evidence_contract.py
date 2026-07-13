@@ -99,3 +99,38 @@ def test_render_page_ignores_malformed_bbox(tmp_path):
 
     result = render_page(str(pdf_path), 1, [1.0, 2.0])  # wrong length
     assert result is not None  # renders the page without the highlight, doesn't crash
+
+
+def test_evidence_points_to_correct_field_after_reprocess_creates_new_run(session_factory):
+    session = session_factory()
+    session.add(db.Package(id="pkg1", status="review_ready"))
+    session.add(db.Document(id="doc1", package_id="pkg1", path="a.pdf", doc_type="cms1500", has_text_layer=True))
+    session.commit()
+
+    run1 = db.create_extraction_run(session, "doc1", "cms1500", "review", 0.7)
+    fields1 = db.create_extracted_fields(session, run1.id, [
+        {"name": "patient_name", "value": "DOE JOHN", "confidence": 0.7, "grounded": True, "valid": True,
+         "field_status": "review", "evidence": {"page": 1, "text": "old quote", "bbox": None, "block_type": "paragraph"}},
+    ])
+
+    # simulate a reprocess: a NEW ExtractionRun (attempt 2) with its own field/evidence
+    run2 = db.create_extraction_run(session, "doc1", "cms1500", "pass", 0.95)
+    fields2 = db.create_extracted_fields(session, run2.id, [
+        {"name": "patient_name", "value": "DOE JOHN", "confidence": 0.95, "grounded": True, "valid": True,
+         "field_status": "found", "evidence": {"page": 1, "text": "new quote", "bbox": [1.0, 2.0, 3.0, 4.0], "block_type": "paragraph"}},
+    ])
+    # capture attributes while still attached — session.commit() (inside
+    # create_extracted_fields) expires prior objects' attributes by default,
+    # and they can't be reloaded once the session is closed below.
+    attempt1, attempt2 = run1.attempt, run2.attempt
+    field1_id, field2_id = fields1[0].id, fields2[0].id
+    session.close()
+
+    assert attempt2 == attempt1 + 1
+
+    with TestClient(app) as client:
+        old_resp = client.get(f"/packages/pkg1/fields/{field1_id}/evidence")
+        new_resp = client.get(f"/packages/pkg1/fields/{field2_id}/evidence")
+
+    assert old_resp.json()["quote"] == "old quote"  # attempt 1's evidence is untouched
+    assert new_resp.json()["quote"] == "new quote"  # attempt 2's evidence is independent
