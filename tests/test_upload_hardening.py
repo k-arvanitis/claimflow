@@ -84,3 +84,15 @@ def test_upload_disambiguates_duplicate_filenames_in_same_upload(monkeypatch, tm
     package_id = resp.json()["package_id"]
     stored_files = sorted(p.name for p in (tmp_path / package_id).iterdir())
     assert len(stored_files) == 2  # both files present, neither overwrote the other
+
+
+def test_document_list_does_not_expose_filesystem_path():
+    with TestClient(app) as client:
+        create = client.post("/packages", files={"files": ("claim.pdf", b"%PDF-1.4", "application/pdf")})
+        package_id = create.json()["package_id"]
+        resp = client.get(f"/packages/{package_id}/documents")
+
+    body = resp.json()
+    assert len(body) == 1
+    assert "path" not in body[0]
+    assert body[0]["filename"] == "claim.pdf"

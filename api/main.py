@@ -410,7 +410,7 @@ async def list_package_documents(package_id: str):
     try:
         return [
             DocumentSummary(
-                document_id=doc.id, path=doc.path, doc_type=doc.doc_type,
+                document_id=doc.id, filename=Path(doc.path).name, doc_type=doc.doc_type,
                 has_text_layer=doc.has_text_layer, scan_quality=doc.scan_quality,
                 classification_reason=doc.classification_reason, manually_overridden=doc.manually_overridden,
             )
@@ -433,7 +433,7 @@ async def get_package_document(package_id: str, document_id: str):
         if doc is None or doc.package_id != package_id:
             raise AppError(404, "DOCUMENT_NOT_FOUND", "Document does not exist")
         return DocumentSummary(
-            document_id=doc.id, path=doc.path, doc_type=doc.doc_type,
+            document_id=doc.id, filename=Path(doc.path).name, doc_type=doc.doc_type,
             has_text_layer=doc.has_text_layer, scan_quality=doc.scan_quality,
             classification_reason=doc.classification_reason, manually_overridden=doc.manually_overridden,
         )

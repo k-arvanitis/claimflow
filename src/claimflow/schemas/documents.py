@@ -5,7 +5,7 @@ from claimflow.schemas.enums import DocumentType
 
 class DocumentSummary(BaseModel):
     document_id: str
-    path: str
+    filename: str
     doc_type: DocumentType
     has_text_layer: bool
     scan_quality: float | None
