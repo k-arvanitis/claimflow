@@ -421,6 +421,18 @@ async def get_document_page_image(package_id: str, document_id: str, page: int, 
     return Response(content=image_bytes, media_type="image/png")
 
 
+def _valid_bbox_shape(bbox) -> list[float] | None:
+    if not isinstance(bbox, list) or len(bbox) != 4:
+        return None
+    try:
+        x0, y0, x1, y1 = (float(v) for v in bbox)
+    except (TypeError, ValueError):
+        return None
+    if x0 >= x1 or y0 >= y1:
+        return None
+    return [x0, y0, x1, y1]
+
+
 @app.get(
     "/packages/{package_id}/fields/{field_id}/evidence",
     response_model=FieldEvidenceResponse,
@@ -437,12 +449,22 @@ async def get_field_evidence(package_id: str, field_id: int):
         doc = session.get(db.Document, run.document_id) if run else None
         if doc is None or doc.package_id != package_id:
             raise AppError(404, "FIELD_NOT_FOUND", "Field does not exist")
+
+        evidence = json.loads(field.evidence_json) if field.evidence_json else None
+        bbox = _valid_bbox_shape(evidence.get("bbox")) if evidence else None
+
         return FieldEvidenceResponse(
             field_id=field.id,
             name=field.name,
             value=json.loads(field.value_json) if field.value_json else None,
             confidence=field.confidence,
-            evidence=json.loads(field.evidence_json) if field.evidence_json else None,
+            document_id=doc.id,
+            filename=Path(doc.path).name,
+            page=evidence.get("page") if evidence else None,
+            quote=evidence.get("text") if evidence else None,
+            bbox=bbox,
+            block_type=evidence.get("block_type") if evidence else None,
+            evidence_unavailable=evidence is None,
         )
     finally:
         session.close()

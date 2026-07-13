@@ -10,7 +10,14 @@ class FieldEvidenceResponse(BaseModel):
     name: str
     value: Any | None
     confidence: float
-    evidence: dict[str, Any] | None
+    document_id: str
+    filename: str
+    page: int | None
+    quote: str | None
+    bbox: list[float] | None
+    coordinate_system: str = "pdf_points"
+    block_type: str | None
+    evidence_unavailable: bool
 
 
 class ReviewFieldSummary(BaseModel):

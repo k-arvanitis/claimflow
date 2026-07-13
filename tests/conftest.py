@@ -21,6 +21,14 @@ def isolated_db(tmp_path, monkeypatch):
 
 
 @pytest.fixture
+def session_factory():
+    """Returns the isolated per-test db.SessionLocal callable (see isolated_db above)."""
+    from claimflow import db
+
+    return db.SessionLocal
+
+
+@pytest.fixture
 def base_state():
     return {
         "package_dir": "/tmp",
