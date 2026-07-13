@@ -340,7 +340,7 @@ Every downloaded artifact is tracked in `eval/real_public/manifest.json` — sou
 - **No production auth/RBAC.** The API and Streamlit UI have no authentication — anyone who can reach the port can submit and review claims.
 - **MedCaseFlow is not implemented.** Medical/legal case-file intelligence (timeline reconstruction, contradiction detection, missing-evidence detection) is a separate, not-yet-built idea.
 - **Scan quality is a heuristic, not real OCR confidence** — a character-density proxy computed by ClaimFlow over the text doc-intel returns; doc-intel's OCR backends don't expose true per-word confidence (see [OCR proof](#ocr-proof)).
-- **Nested/list field row confidence and evidence are inherited from the parent field, not computed per row.** `diagnosis_codes`, `service_lines`, and `line_items` are individually reviewable (add/edit/delete rows, exported with action/original/final value) — see [Human review queue](#human-review-queue) — but doc-intel scores a list field as one whole, so every row in the export shares the same confidence/evidence rather than having its own.
+- **`diagnosis_codes` (a flat string list) has no per-item confidence/evidence** — doc-intel only scores list-of-object fields per row, so a scalar list is scored once, as a whole. `service_lines` and `line_items` (list-of-object fields) DO get independent per-row confidence, evidence, and review actions with stable row identity — see [Human review queue](#human-review-queue).
 - **Field accuracy is exact-match**, normalized for dates/currency but not names/addresses — minor OCR spelling variance counts as wrong even if a human reviewer would accept it.
 - **Blank-field hallucination risk.** A model can fabricate a value for a blank field even when the schema allows null and the prompt says not to guess. Deterministic pattern checks catch this for `tax_id`, `applicant_name`, `billing_provider_npi`, and `claim_number` — generalizable, real-world rules, not synthetic-data hacks. `insurance_id` is mitigated by making the field nullable. `signature_on_file` remains unresolved — it's fundamentally a visual question, and needs vision-based verification, not another prompt tweak.
 - **Health source-evidence accuracy (~85%) is lower than property/loan (~96–100%)** due to CMS-1500's dense form layout — values are often split across adjacent sub-boxes (e.g. date of birth as separate MM/DD/YY cells), which can push fuzzy-match grounding below threshold even when the extracted value itself is correct.
@@ -354,7 +354,7 @@ Before using ClaimFlow with real regulated data, the following are required:
 - compliance-grade immutable audit logging, access-event capture and retention controls
 - encryption at rest / secure object storage
 - PHI/PII retention and deletion policy
-- per-row confidence and evidence for nested/list fields
+- per-item confidence and evidence for scalar list fields (e.g. `diagnosis_codes`)
 - production deployment profile
 - real private-domain pilot testing under appropriate agreements
 
