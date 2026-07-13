@@ -15,7 +15,7 @@ _OCR_LOW_CONF_THRESHOLD = 20  # chars; below this, OCR likely failed on a low-qu
 # input goes through the exact same page-based pipeline (classification, OCR, bbox evidence).
 _IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".tiff", ".bmp"}
 _OFFICE_SUFFIXES = {".docx"}
-_INGESTIBLE_SUFFIXES = {".pdf"} | _IMAGE_SUFFIXES | _OFFICE_SUFFIXES
+INGESTIBLE_SUFFIXES = {".pdf"} | _IMAGE_SUFFIXES | _OFFICE_SUFFIXES
 
 
 def _office_to_pdf(path: Path, out_dir: Path) -> Path:
@@ -58,7 +58,7 @@ def _classify_doc_type(text: str) -> tuple[str, str | None]:
 
 def ingest_node(state: ClaimState) -> dict:
     pkg = Path(state["package_dir"])
-    sources = sorted(p for p in pkg.iterdir() if p.suffix.lower() in _INGESTIBLE_SUFFIXES)
+    sources = sorted(p for p in pkg.iterdir() if p.suffix.lower() in INGESTIBLE_SUFFIXES)
     if not sources:
         return {"error": f"No supported documents found in {pkg}", "documents": [], "domain": None}
 

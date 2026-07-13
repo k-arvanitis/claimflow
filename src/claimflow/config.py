@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     # NOT encrypted at rest — see TODO.md.
     db_path: str = "data/claimflow.db"
     storage_dir: str = "data/uploads"
+    max_upload_size_bytes: int = 20_000_000  # 20MB per file
+    max_files_per_package: int = 30
 
 
 settings = Settings()

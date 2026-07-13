@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse, Response
 from claimflow import db, review
 from claimflow.config import settings
 from claimflow.graph import build_graph
+from claimflow.nodes.ingest import INGESTIBLE_SUFFIXES
 from claimflow.nodes.review import review_node
 from claimflow.pages import render_page
 from claimflow.schemas.dashboard import DashboardSummaryResponse
@@ -220,19 +221,53 @@ def _run_claim(graph, package_id: str, pkg_dir: Path, doc_type_overrides: dict[s
     responses=ERROR_RESPONSES,
 )
 async def create_package(files: list[UploadFile], background_tasks: BackgroundTasks):
+    if len(files) > settings.max_files_per_package:
+        raise AppError(400, "TOO_MANY_FILES", f"A package may contain at most {settings.max_files_per_package} files")
+
+    for f in files:
+        name = Path(f.filename or "").name
+        if not name or Path(name).suffix.lower() not in INGESTIBLE_SUFFIXES:
+            raise AppError(400, "UNSUPPORTED_FILE_TYPE", f"Unsupported file type: {f.filename!r}")
+
     package_id = str(uuid.uuid4())
     pkg_dir = Path(settings.storage_dir) / package_id
     pkg_dir.mkdir(parents=True, exist_ok=True)
-    for f in files:
-        dest = pkg_dir / Path(f.filename).name
-        with open(dest, "wb") as out:
-            shutil.copyfileobj(f.file, out)
+
+    try:
+        used_names: set[str] = set()
+        for f in files:
+            name = Path(f.filename).name
+            if name in used_names:
+                stem, suffix = Path(name).stem, Path(name).suffix
+                n = 1
+                while f"{stem}_{n}{suffix}" in used_names:
+                    n += 1
+                name = f"{stem}_{n}{suffix}"
+            used_names.add(name)
+
+            dest = pkg_dir / name
+            written = 0
+            with open(dest, "wb") as out:
+                while chunk := f.file.read(1024 * 1024):
+                    written += len(chunk)
+                    if written > settings.max_upload_size_bytes:
+                        raise AppError(
+                            400, "FILE_TOO_LARGE",
+                            f"{f.filename!r} exceeds the {settings.max_upload_size_bytes}-byte limit",
+                        )
+                    out.write(chunk)
+    except Exception:
+        shutil.rmtree(pkg_dir, ignore_errors=True)
+        raise
 
     session = db.SessionLocal()
     try:
         db.create_package(session, package_id)
-        db.log_audit(session, package_id, "api", "upload", {"filenames": [f.filename for f in files]})
+        db.log_audit(session, package_id, "api", "upload", {"filenames": list(used_names)})
         db.transition_package_status(session, package_id, "queued", reason="upload complete")
+    except Exception:
+        shutil.rmtree(pkg_dir, ignore_errors=True)
+        raise
     finally:
         session.close()
 
