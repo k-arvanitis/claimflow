@@ -460,6 +460,80 @@ def list_packages(session: Session) -> list[Package]:
     return list(session.query(Package).order_by(Package.created_at.desc()).all())
 
 
+MAX_PAGE_SIZE = 100
+
+
+def list_packages_filtered(
+    session: Session,
+    *,
+    status: str | None = None,
+    domain: str | None = None,
+    decision: str | None = None,
+    confidence_min: float | None = None,
+    confidence_max: float | None = None,
+    validation_rule: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    search: str | None = None,
+    sort: str = "-created_at",
+    page: int = 1,
+    page_size: int = 25,
+) -> tuple[list[Package], int]:
+    """Filters/sorts/paginates packages. Cheap column filters (status, date range,
+    search) run in SQL first; domain/decision/confidence/validation_rule — which
+    live on each package's LATEST ExtractionRun/Decision, not on Package itself —
+    are applied in Python over that narrowed candidate set.
+
+    ponytail: this fetches the full narrowed candidate set into Python before the
+    run/decision-level filters and pagination slice. Fine at portfolio scale
+    (hundreds of packages); would need real SQL joins/window functions if package
+    counts grew to production scale.
+    """
+    query = session.query(Package)
+    if status is not None:
+        query = query.filter(Package.status == status)
+    if date_from is not None:
+        query = query.filter(Package.created_at >= date_from)
+    if date_to is not None:
+        query = query.filter(Package.created_at <= date_to)
+    if search:
+        query = query.filter(Package.id.ilike(f"%{search}%"))
+
+    candidates = query.all()
+
+    def _matches(pkg: Package) -> bool:
+        if domain is not None or confidence_min is not None or confidence_max is not None or validation_rule is not None:
+            run = latest_extraction_run_for_package(session, pkg.id)
+            if run is None:
+                return False
+            if domain is not None and run.schema_name != domain:
+                return False
+            if confidence_min is not None and run.overall_confidence < confidence_min:
+                return False
+            if confidence_max is not None and run.overall_confidence > confidence_max:
+                return False
+            if validation_rule is not None:
+                failures = list_validation_failures_for_run(session, run.id, current_only=True)
+                if not any(f.rule == validation_rule for f in failures):
+                    return False
+        if decision is not None:
+            latest = latest_decision_for_package(session, pkg.id)
+            if latest is None or latest.decision != decision:
+                return False
+        return True
+
+    filtered = [pkg for pkg in candidates if _matches(pkg)]
+
+    descending = sort.startswith("-")
+    filtered.sort(key=lambda p: p.created_at, reverse=descending)
+
+    total = len(filtered)
+    page = max(page, 1)
+    page_size = max(1, min(page_size, MAX_PAGE_SIZE))
+    start = (page - 1) * page_size
+    return filtered[start : start + page_size], total
+
+
 def get_package(session: Session, package_id: str) -> Package | None:
     return session.get(Package, package_id)
 
