@@ -520,7 +520,7 @@ async def submit_field_review(package_id: str, field_id: int, body: FieldReviewR
         if doc is None or doc.package_id != package_id:
             raise AppError(404, "FIELD_NOT_FOUND", "Field does not exist")
 
-        failures_before = db.list_validation_failures_for_run(session, run.id)
+        failures_before = db.list_validation_failures_for_run(session, run.id, current_only=True)
         validation_before = [f.reason for f in failures_before if f.field == field.name]
 
         action = db.record_review_action(
