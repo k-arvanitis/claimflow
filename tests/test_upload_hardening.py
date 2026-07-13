@@ -96,3 +96,28 @@ def test_document_list_does_not_expose_filesystem_path():
     assert len(body) == 1
     assert "path" not in body[0]
     assert body[0]["filename"] == "claim.pdf"
+
+
+def test_page_render_rejects_document_path_outside_package_dir(tmp_path, monkeypatch):
+    from claimflow.config import settings
+    monkeypatch.setattr(settings, "storage_dir", str(tmp_path))
+
+    from claimflow import db
+
+    with TestClient(app) as client:
+        create = client.post("/packages", files={"files": ("claim.pdf", b"%PDF-1.4", "application/pdf")})
+        package_id = create.json()["package_id"]
+
+    outside_file = tmp_path.parent / "outside.pdf"
+    outside_file.write_bytes(b"%PDF-1.4 secret")
+
+    session = db.SessionLocal()
+    doc = db.Document(id="evil-doc", package_id=package_id, path=str(outside_file), doc_type="cms1500", has_text_layer=True)
+    session.add(doc)
+    session.commit()
+    session.close()
+
+    with TestClient(app) as client:
+        resp = client.get(f"/packages/{package_id}/documents/evil-doc/pages/1")
+
+    assert resp.status_code == 404

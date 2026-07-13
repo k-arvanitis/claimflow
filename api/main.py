@@ -482,6 +482,14 @@ async def get_document_page_image(package_id: str, document_id: str, page: int, 
         doc = db.get_document(session, document_id)
         if doc is None or doc.package_id != package_id:
             raise AppError(404, "DOCUMENT_NOT_FOUND", "Document does not exist")
+        pkg_dir = Path(settings.storage_dir) / package_id
+        try:
+            resolved_doc_path = Path(doc.path).resolve()
+            resolved_pkg_dir = pkg_dir.resolve()
+        except OSError:
+            raise AppError(404, "DOCUMENT_NOT_FOUND", "Document does not exist")
+        if resolved_pkg_dir not in resolved_doc_path.parents and resolved_doc_path != resolved_pkg_dir:
+            raise AppError(404, "DOCUMENT_NOT_FOUND", "Document does not exist")
     finally:
         session.close()
 
