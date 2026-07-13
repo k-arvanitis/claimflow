@@ -513,6 +513,7 @@ async def get_package_review(package_id: str):
                     field_id=f.id, name=f.name,
                     value=json.loads(f.value_json) if f.value_json else None,
                     confidence=f.confidence, field_status=f.field_status,
+                    parent_field=f.parent_field,
                 )
                 for f in fields
             ],

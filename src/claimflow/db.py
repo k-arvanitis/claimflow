@@ -108,6 +108,7 @@ class ExtractedField(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     extraction_run_id: Mapped[str] = mapped_column(ForeignKey("extraction_runs.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String)
+    parent_field: Mapped[str | None] = mapped_column(String, default=None, index=True)
     value_json: Mapped[str | None] = mapped_column(Text, default=None)
     confidence: Mapped[float] = mapped_column(Float)
     grounded: Mapped[bool] = mapped_column(Boolean)
@@ -330,6 +331,7 @@ def create_extracted_fields(session: Session, extraction_run_id: str, fields: li
         ExtractedField(
             extraction_run_id=extraction_run_id,
             name=f["name"],
+            parent_field=f.get("parent_field"),
             value_json=json.dumps(f["value"]),
             confidence=f["confidence"],
             grounded=f["grounded"],

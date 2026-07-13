@@ -26,6 +26,7 @@ class ReviewFieldSummary(BaseModel):
     value: Any | None
     confidence: float
     field_status: str
+    parent_field: str | None
 
 
 class ReviewValidationFailure(BaseModel):
