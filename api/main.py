@@ -15,6 +15,7 @@ from claimflow.config import settings
 from claimflow.graph import build_graph
 from claimflow.nodes.review import review_node
 from claimflow.pages import render_page
+from claimflow.schemas.dashboard import DashboardSummaryResponse
 from claimflow.schemas.documents import DocumentReclassifyRequest, DocumentReclassifyResponse, DocumentSummary
 from claimflow.schemas.enums import PackageStatus
 from claimflow.schemas.errors import AppError, ErrorBody, ErrorEnvelope
@@ -118,6 +119,20 @@ async def _generic_handler(request, exc):
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get(
+    "/dashboard/summary",
+    response_model=DashboardSummaryResponse,
+    tags=["dashboard"],
+    responses=ERROR_RESPONSES,
+)
+async def get_dashboard_summary():
+    session = db.SessionLocal()
+    try:
+        return DashboardSummaryResponse(**db.compute_dashboard_summary(session))
+    finally:
+        session.close()
 
 
 def _classify_exception(graph, config) -> str:

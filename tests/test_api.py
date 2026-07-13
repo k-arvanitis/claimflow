@@ -604,3 +604,16 @@ def test_list_documents_includes_classification_metadata():
 
     assert docs[0]["classification_reason"] == "matched domain keyword 'cms-1500' for cms1500"
     assert docs[0]["manually_overridden"] is False
+
+
+def test_dashboard_summary_endpoint():
+    from api.main import app
+    with TestClient(app) as client:
+        resp = client.get("/dashboard/summary")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert set(body.keys()) == {
+        "total_packages", "processing", "awaiting_review", "approved", "flagged",
+        "escalated", "processing_errors", "straight_through_rate", "top_validation_failures",
+    }

@@ -534,6 +534,52 @@ def list_packages_filtered(
     return filtered[start : start + page_size], total
 
 
+def compute_dashboard_summary(session: Session) -> dict:
+    total_packages = session.query(Package).count()
+    processing = session.query(Package).filter(Package.status == "processing").count()
+    awaiting_review = session.query(Package).filter(Package.status == "review_ready").count()
+    approved = session.query(Package).filter(Package.status == "completed").count()
+    processing_errors = (
+        session.query(Package)
+        .filter(Package.status.in_(("processing_error", "validation_error", "retrieval_error")))
+        .count()
+    )
+
+    flagged = 0
+    escalated = 0
+    for pkg in session.query(Package).filter(Package.status == "review_ready").all():
+        latest = latest_decision_for_package(session, pkg.id)
+        if latest is None:
+            continue
+        if latest.decision == "flagged":
+            flagged += 1
+        elif latest.decision == "escalated":
+            escalated += 1
+
+    decided_total = approved + flagged + escalated
+    straight_through_rate = (approved / decided_total) if decided_total > 0 else 0.0
+
+    rule_counts: dict[str, int] = {}
+    for failure in session.query(ValidationFailure).filter_by(superseded=False).all():
+        rule_counts[failure.rule] = rule_counts.get(failure.rule, 0) + 1
+    top_validation_failures = [
+        {"rule": rule, "count": count}
+        for rule, count in sorted(rule_counts.items(), key=lambda kv: kv[1], reverse=True)[:5]
+    ]
+
+    return {
+        "total_packages": total_packages,
+        "processing": processing,
+        "awaiting_review": awaiting_review,
+        "approved": approved,
+        "flagged": flagged,
+        "escalated": escalated,
+        "processing_errors": processing_errors,
+        "straight_through_rate": straight_through_rate,
+        "top_validation_failures": top_validation_failures,
+    }
+
+
 def get_package(session: Session, package_id: str) -> Package | None:
     return session.get(Package, package_id)
 
