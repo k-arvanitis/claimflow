@@ -392,7 +392,7 @@ def record_review_action(
     existing = (
         session.query(ReviewAction)
         .filter_by(extraction_run_id=extraction_run_id, field_name=field_name)
-        .order_by(ReviewAction.created_at.desc())
+        .order_by(ReviewAction.created_at.desc(), ReviewAction.id.desc())
         .first()
     )
     if (
