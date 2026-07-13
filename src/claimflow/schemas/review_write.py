@@ -32,6 +32,9 @@ class ValidationFailureItem(BaseModel):
 
 class ValidationRerunResponse(BaseModel):
     validation_failures: list[ValidationFailureItem]
+    decision: DecisionType
+    decision_changed: bool
+    previous_decision: DecisionType | None
 
 
 class DecisionRequest(BaseModel):

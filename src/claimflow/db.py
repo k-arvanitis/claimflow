@@ -126,6 +126,7 @@ class ValidationFailure(Base):
     field: Mapped[str] = mapped_column(String)
     rule: Mapped[str] = mapped_column(String)
     reason: Mapped[str] = mapped_column(Text)
+    superseded: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     extraction_run: Mapped["ExtractionRun"] = relationship(back_populates="validation_failures")
@@ -486,8 +487,22 @@ def list_extracted_fields_for_run(session: Session, extraction_run_id: str) -> l
     return list(session.query(ExtractedField).filter_by(extraction_run_id=extraction_run_id).all())
 
 
-def list_validation_failures_for_run(session: Session, extraction_run_id: str) -> list[ValidationFailure]:
-    return list(session.query(ValidationFailure).filter_by(extraction_run_id=extraction_run_id).all())
+def list_validation_failures_for_run(
+    session: Session, extraction_run_id: str, current_only: bool = False
+) -> list[ValidationFailure]:
+    query = session.query(ValidationFailure).filter_by(extraction_run_id=extraction_run_id)
+    if current_only:
+        query = query.filter_by(superseded=False)
+    return list(query.all())
+
+
+def supersede_validation_failures(session: Session, extraction_run_id: str) -> None:
+    """Marks a run's current validation failures as historical (audit trail) —
+    never deletes them — so a rerun's new failures become the only "current" set."""
+    session.query(ValidationFailure).filter_by(extraction_run_id=extraction_run_id, superseded=False).update(
+        {"superseded": True}
+    )
+    session.commit()
 
 
 def latest_extraction_run_for_package(session: Session, package_id: str) -> ExtractionRun | None:

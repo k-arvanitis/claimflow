@@ -69,3 +69,20 @@ def test_distinct_review_action_creates_new_row(session):
 
     assert first.id != second.id
     assert session.query(db.ReviewAction).filter_by(extraction_run_id="run1", field_name="patient_name").count() == 2
+
+
+def test_rerun_persists_new_failures_and_supersedes_old(session):
+    _seed_field(session)
+    session.add(db.ValidationFailure(extraction_run_id="run1", field="patient_dob", rule="mandatory", reason="missing"))
+    session.commit()
+
+    db.supersede_validation_failures(session, "run1")
+    db.create_validation_failures(session, "run1", [{"field": "patient_name", "rule": "mandatory", "reason": "still wrong"}])
+
+    all_failures = db.list_validation_failures_for_run(session, "run1")
+    current = db.list_validation_failures_for_run(session, "run1", current_only=True)
+
+    assert len(all_failures) == 2  # old one retained, not deleted
+    assert len(current) == 1
+    assert current[0].field == "patient_name"
+    assert all(f.superseded for f in all_failures if f.field == "patient_dob")

@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse, Response
 from claimflow import db, review
 from claimflow.config import settings
 from claimflow.graph import build_graph
+from claimflow.nodes.review import review_node
 from claimflow.pages import render_page
 from claimflow.schemas.documents import DocumentReclassifyRequest, DocumentReclassifyResponse, DocumentSummary
 from claimflow.schemas.enums import PackageStatus
@@ -480,7 +481,7 @@ async def get_package_review(package_id: str):
 
         run = db.latest_extraction_run_for_package(session, package_id)
         fields = db.list_extracted_fields_for_run(session, run.id) if run else []
-        failures = db.list_validation_failures_for_run(session, run.id) if run else []
+        failures = db.list_validation_failures_for_run(session, run.id, current_only=True) if run else []
 
         return PackageReviewResponse(
             package_id=package_id,
@@ -553,15 +554,41 @@ async def rerun_package_validation(package_id: str, body: ValidationRerunRequest
         if pkg is None:
             raise AppError(404, "PACKAGE_NOT_FOUND", "Package does not exist")
         result = json.loads(pkg.result_json) if pkg.result_json else {}
+        run = db.latest_extraction_run_for_package(session, package_id)
+        previous_decision_row = db.latest_decision_for_package(session, package_id)
+        previous_decision = previous_decision_row.decision if previous_decision_row else None
+
+        domain = result.get("domain")
+        merged = dict(result.get("extraction_data") or {})
+        merged.update(body.corrected_fields)
+        failures = review.rerun_validation(domain, merged)
+
+        if run is not None:
+            db.supersede_validation_failures(session, run.id)
+            db.create_validation_failures(
+                session, run.id, [{"field": f["field"], "rule": f["rule"], "reason": f["reason"]} for f in failures]
+            )
+
+        review_state = {
+            "error": None,
+            "extraction_overall_confidence": run.overall_confidence if run else 0.0,
+            "validation_failures": failures,
+        }
+        outcome = review_node(review_state)
+        new_decision = outcome["decision"]
+
+        db.log_audit(
+            session, package_id, "api", "validation_rerun",
+            {"validation_failures": [dict(f) for f in failures], "decision": new_decision, "previous_decision": previous_decision},
+        )
     finally:
         session.close()
 
-    domain = result.get("domain")
-    merged = dict(result.get("extraction_data") or {})
-    merged.update(body.corrected_fields)
-    failures = review.rerun_validation(domain, merged)
     return ValidationRerunResponse(
-        validation_failures=[ValidationFailureItem(field=f["field"], rule=f["rule"], reason=f["reason"]) for f in failures]
+        validation_failures=[ValidationFailureItem(field=f["field"], rule=f["rule"], reason=f["reason"]) for f in failures],
+        decision=new_decision,
+        decision_changed=new_decision != previous_decision,
+        previous_decision=previous_decision,
     )
 
 

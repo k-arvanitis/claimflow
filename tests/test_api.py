@@ -387,6 +387,29 @@ def test_validation_rerun():
     assert mock_rerun.called
 
 
+def test_rerun_validation_endpoint_persists_results():
+    from api.main import app
+    from claimflow import db
+
+    with patch("api.main.build_graph", return_value=MagicMock()):
+        with TestClient(app) as client:
+            create = client.post("/packages", files={"files": ("a.pdf", b"%PDF-1.4", "application/pdf")})
+            package_id = create.json()["package_id"]
+
+            session = db.SessionLocal()
+            db.update_package_status(session, package_id, "review_ready", result={
+                "domain": "cms1500", "extraction_data": {"patient_name": "DOE JOHN"},
+            })
+            session.close()
+
+            resp = client.post(f"/packages/{package_id}/validation/re-run", json={"corrected_fields": {"patient_name": "DOE JON"}})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "decision" in body
+    assert "decision_changed" in body
+
+
 def test_submit_decision():
     from api.main import app
     from claimflow import db
