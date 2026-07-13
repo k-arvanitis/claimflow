@@ -547,6 +547,9 @@ def compute_dashboard_summary(session: Session) -> dict:
 
     flagged = 0
     escalated = 0
+    # ponytail: N+1 query, one latest_decision_for_package() call per review_ready
+    # package. Fine for a once-per-page-load dashboard call at portfolio scale;
+    # switch to a single grouped query if review_ready volume grows large.
     for pkg in session.query(Package).filter(Package.status == "review_ready").all():
         latest = latest_decision_for_package(session, pkg.id)
         if latest is None:
