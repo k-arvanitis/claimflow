@@ -130,6 +130,13 @@ LOAN = Domain(
     spec=_SPEC,
     validate=_validate,
     supporting_types=_SUPPORTING_TYPES,
+    display_name="SBA Loan Application",
+    policy_collection="loan",
+    question_templates={
+        "income_consistency": "What is the policy when net income exceeds gross revenue on a loan application? {reason}",
+        "positive_amount": "What is the minimum loan amount required? {reason}",
+        "signature_required": "What happens when a loan application is missing a signature? {reason}",
+    },
 )
 
 register(LOAN)
@@ -221,6 +228,8 @@ SBA_FORM_413 = Domain(
     keywords={"personal financial statement", "sba form 413", "schedule of real estate"},
     spec=_FORM_413_SPEC,
     validate=_validate_form_413,
+    display_name="SBA Form 413 Personal Financial Statement",
+    policy_collection="loan",
 )
 register(SBA_FORM_413)
 
@@ -313,5 +322,7 @@ SBA_FORM_2202 = Domain(
     keywords={"sba form 2202", "schedule of liabilities"},
     spec=_FORM_2202_SPEC,
     validate=_validate_form_2202,
+    display_name="SBA Form 2202 Schedule of Liabilities",
+    policy_collection="loan",
 )
 register(SBA_FORM_2202)

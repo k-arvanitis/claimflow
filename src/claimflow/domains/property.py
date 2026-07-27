@@ -266,6 +266,13 @@ PROPERTY = Domain(
     spec=_SPEC,
     validate=_validate,
     supporting_types=_SUPPORTING_TYPES,
+    display_name="Property Insurance (Xactimate)",
+    policy_collection="property",
+    question_templates={
+        "arithmetic": "What is the policy on line-item total discrepancies in property estimates? {reason}",
+        "acv_check": "What is the policy when actual cash value does not equal RCV minus depreciation? {reason}",
+        "negative_amount": "What is the policy when a claim amount is negative? {reason}",
+    },
 )
 
 register(PROPERTY)
@@ -418,5 +425,7 @@ DECLARATIONS_PAGE = Domain(
     keywords={"declarations page", "policy declarations", "insurance declarations"},
     spec=_DECLARATIONS_SPEC,
     validate=_validate_declarations,
+    display_name="Insurance Declarations Page",
+    policy_collection="property",
 )
 register(DECLARATIONS_PAGE)

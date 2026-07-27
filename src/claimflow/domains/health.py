@@ -429,6 +429,19 @@ HEALTH = Domain(
     spec=_SPEC,
     validate=_validate,
     supporting_types=_SUPPORTING_TYPES,
+    display_name="CMS-1500 Health Claim",
+    policy_collection="health",
+    retrieval_mode="official_deterministic",
+    question_templates={
+        "icd10_lookup": "What CMS-1500 policy applies when Item 21 contains an unrecognized ICD-10-CM diagnosis code? {reason}",
+        "cpt_lookup": "What CMS-1500 policy applies when Item 24D contains an unrecognized CPT/HCPCS procedure code? {reason}",
+        "arithmetic": "What is the policy on charge discrepancies? {reason}",
+    },
+    reviewer_guidance=(
+        "CMS-1500 is the primary, most-validated domain pack. Validation "
+        "checks NPI format, ICD-10/CPT lookup membership, and arithmetic; "
+        "policy citations come from official CMS manuals, not synthetic text."
+    ),
 )
 
 register(HEALTH)
@@ -583,6 +596,8 @@ EOB_DOMAIN = Domain(
     },
     spec=_EOB_SPEC,
     validate=_validate_eob,
+    display_name="Explanation of Benefits",
+    policy_collection="health",
 )
 register(EOB_DOMAIN)
 
@@ -596,5 +611,7 @@ MEDICARE_SUMMARY_NOTICE = Domain(
         name="medicare_summary_notice", model=EOB, system_prompt=_EOB_PROMPT
     ),
     validate=_validate_eob,
+    display_name="Medicare Summary Notice",
+    policy_collection="health",
 )
 register(MEDICARE_SUMMARY_NOTICE)
