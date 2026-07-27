@@ -54,7 +54,7 @@ def test_post_packages_returns_decision():
         "extraction_overall_confidence": 0.88,
         "validation_failures": [],
         "policy_answers": [],
-        "decision": "approved",
+        "decision": "ready_for_processing",
         "review_reasons": [],
         "error": None,
     }
@@ -84,7 +84,7 @@ def test_post_packages_returns_decision():
     assert result.status_code == 200
     data = result.json()
     assert data["status"] == "completed"
-    assert data["result"]["decision"] == "approved"
+    assert data["result"]["decision"] == "ready_for_processing"
     assert data["result"]["documents"] == [
         {
             "filename": "claim.pdf",
@@ -100,7 +100,7 @@ def test_post_packages_returns_decision():
     assert data["document_count"] == 1
     assert data["validation_failure_count"] == 0
     assert (
-        data["decision"] == "approved"
+        data["decision"] == "ready_for_processing"
     )  # persist_extraction_result records a Decision row on graph completion
     assert data["review_reasons"] == []
     assert data["created_at"] and data["updated_at"]
@@ -287,7 +287,7 @@ def test_get_documents_for_package():
         "extraction_overall_confidence": 0.9,
         "validation_failures": [],
         "policy_answers": [],
-        "decision": "approved",
+        "decision": "ready_for_processing",
         "review_reasons": [],
         "error": None,
     }
@@ -357,7 +357,7 @@ def test_reviews_queue_lists_flagged_packages():
             {"field": "diagnosis_codes", "rule": "icd10_lookup", "reason": "bad code"}
         ],
         "policy_answers": [],
-        "decision": "flagged",
+        "decision": "needs_review",
         "review_reasons": ["bad code"],
         "error": None,
     }
@@ -410,7 +410,7 @@ def test_package_review_view():
             {"field": "diagnosis_codes", "rule": "icd10_lookup", "reason": "bad code"}
         ],
         "policy_answers": [],
-        "decision": "flagged",
+        "decision": "needs_review",
         "review_reasons": ["bad code"],
         "error": None,
     }
@@ -466,7 +466,7 @@ def test_submit_field_review():
             {"field": "diagnosis_codes", "rule": "icd10_lookup", "reason": "bad code"}
         ],
         "policy_answers": [],
-        "decision": "flagged",
+        "decision": "needs_review",
         "review_reasons": ["bad code"],
         "error": None,
     }
@@ -542,7 +542,7 @@ def test_validation_rerun():
         "extraction_overall_confidence": 0.5,
         "validation_failures": [],
         "policy_answers": [],
-        "decision": "flagged",
+        "decision": "needs_review",
         "review_reasons": [],
         "error": None,
     }
@@ -634,16 +634,16 @@ def test_submit_decision():
 
             decision_response = client.post(
                 f"/packages/{package_id}/decision",
-                json={"decision": "approved", "review_reasons": []},
+                json={"decision": "ready_for_processing", "review_reasons": []},
             )
 
     assert decision_response.status_code == 200
-    assert decision_response.json()["decision"] == "approved"
+    assert decision_response.json()["decision"] == "ready_for_processing"
 
     session = db.SessionLocal()
     try:
         latest = db.latest_decision_for_package(session, package_id)
-        assert latest.decision == "approved"
+        assert latest.decision == "ready_for_processing"
     finally:
         session.close()
 
@@ -675,7 +675,7 @@ def test_policy_evidence_and_audit_endpoints():
                 "citations": ["policy excerpt [1]"],
             }
         ],
-        "decision": "flagged",
+        "decision": "needs_review",
         "review_reasons": ["bad code"],
         "error": None,
     }
@@ -705,7 +705,7 @@ def test_policy_evidence_and_audit_endpoints():
     assert export_response.status_code == 200
     export_body = export_response.json()
     assert export_body["package_id"] == package_id
-    assert export_body["decision"] == "flagged"
+    assert export_body["decision"] == "needs_review"
 
 
 def test_export_404_for_unknown_package():
@@ -855,7 +855,7 @@ def test_list_documents_includes_classification_metadata():
         "extraction_overall_confidence": 0.9,
         "validation_failures": [],
         "policy_answers": [],
-        "decision": "approved",
+        "decision": "ready_for_processing",
         "review_reasons": [],
         "error": None,
     }

@@ -143,7 +143,7 @@ def test_page_render_succeeds_for_legitimate_document(tmp_path, monkeypatch):
                 "doc_type": "cms1500", "has_text_layer": True, "scan_quality": None,
             }],
             "extraction_fields": [], "extraction_status": "pass", "extraction_overall_confidence": 0.9,
-            "validation_failures": [], "policy_answers": [], "decision": "approved",
+            "validation_failures": [], "policy_answers": [], "decision": "ready_for_processing",
             "review_reasons": [], "error": None,
         }
 

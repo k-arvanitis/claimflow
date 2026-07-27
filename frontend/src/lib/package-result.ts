@@ -40,7 +40,7 @@ export type PackageDocumentResult = {
 };
 
 export type PackageResult = {
-  decision: "approved" | "flagged" | "escalated" | null;
+  decision: "ready_for_processing" | "needs_review" | "blocked_or_incomplete" | null;
   extraction_data: Record<string, unknown> | null;
   domain: string | null;
   documents: PackageDocumentResult[];

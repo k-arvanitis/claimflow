@@ -253,7 +253,10 @@ export function useRerunValidation(packageId: string) {
 export function useRecordDecision(packageId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { decision: "approved" | "flagged" | "escalated"; reviewReasons?: string[] }) => {
+    mutationFn: async (input: {
+      decision: "ready_for_processing" | "needs_review" | "blocked_or_incomplete";
+      reviewReasons?: string[];
+    }) => {
       const { data, error } = await api.POST("/packages/{package_id}/decision", {
         params: { path: { package_id: packageId } },
         body: { decision: input.decision, review_reasons: input.reviewReasons ?? [] },

@@ -6,7 +6,12 @@ import { withQueryClient } from "@/test/query-wrapper";
 import type { ExtractionField, ValidationFailure } from "@/lib/package-result";
 
 const postMock = vi.fn().mockResolvedValue({
-  data: { validation_failures: [], decision: "approved", decision_changed: true, previous_decision: "flagged" },
+  data: {
+    validation_failures: [],
+    decision: "ready_for_processing",
+    decision_changed: true,
+    previous_decision: "needs_review",
+  },
   error: null,
 });
 
@@ -63,7 +68,7 @@ describe("ValidationTab", () => {
       })
     );
     expect(await screen.findByText(/resulted in decision/i)).toBeInTheDocument();
-    expect(screen.getByText("approved")).toBeInTheDocument();
+    expect(screen.getByText("ready_for_processing")).toBeInTheDocument();
   });
 
   it("sends rejected nested rows as removals", async () => {

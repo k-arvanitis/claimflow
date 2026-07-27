@@ -25,8 +25,8 @@ def _pkg_with_decision(session, package_id, status, decision=None, decision_age_
 def test_dashboard_summary_counts_by_status(session):
     _pkg_with_decision(session, "p1", "processing")
     _pkg_with_decision(session, "p2", "processing")
-    _pkg_with_decision(session, "p3", "review_ready", "flagged")
-    _pkg_with_decision(session, "p4", "completed", "approved")
+    _pkg_with_decision(session, "p3", "review_ready", "needs_review")
+    _pkg_with_decision(session, "p4", "completed", "ready_for_processing")
     _pkg_with_decision(session, "p5", "processing_error")
 
     summary = db.compute_dashboard_summary(session)
@@ -39,9 +39,9 @@ def test_dashboard_summary_counts_by_status(session):
 
 
 def test_dashboard_summary_splits_flagged_vs_escalated_by_latest_decision(session):
-    _pkg_with_decision(session, "p1", "review_ready", "flagged")
-    _pkg_with_decision(session, "p2", "review_ready", "escalated")
-    _pkg_with_decision(session, "p3", "review_ready", "escalated")
+    _pkg_with_decision(session, "p1", "review_ready", "needs_review")
+    _pkg_with_decision(session, "p2", "review_ready", "blocked_or_incomplete")
+    _pkg_with_decision(session, "p3", "review_ready", "blocked_or_incomplete")
 
     summary = db.compute_dashboard_summary(session)
 
@@ -52,8 +52,8 @@ def test_dashboard_summary_splits_flagged_vs_escalated_by_latest_decision(sessio
 def test_dashboard_summary_uses_latest_decision_not_first(session):
     session.add(db.Package(id="p1", status="review_ready"))
     session.commit()
-    db.create_decision(session, "p1", "escalated", [])
-    db.create_decision(session, "p1", "flagged", [])  # reviewer downgraded it later
+    db.create_decision(session, "p1", "blocked_or_incomplete", [])
+    db.create_decision(session, "p1", "needs_review", [])  # reviewer downgraded it later
 
     summary = db.compute_dashboard_summary(session)
 
@@ -62,9 +62,9 @@ def test_dashboard_summary_uses_latest_decision_not_first(session):
 
 
 def test_straight_through_rate_computed_from_decided_packages(session):
-    _pkg_with_decision(session, "p1", "completed", "approved")
-    _pkg_with_decision(session, "p2", "completed", "approved")
-    _pkg_with_decision(session, "p3", "review_ready", "flagged")
+    _pkg_with_decision(session, "p1", "completed", "ready_for_processing")
+    _pkg_with_decision(session, "p2", "completed", "ready_for_processing")
+    _pkg_with_decision(session, "p3", "review_ready", "needs_review")
 
     summary = db.compute_dashboard_summary(session)
 

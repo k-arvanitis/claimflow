@@ -13,7 +13,7 @@ export type PackageStatus =
   | "retrieval_error";
 
 /** Mirrors DecisionType — the routing outcome, distinct from processing status. */
-export type RoutingDecision = "approved" | "flagged" | "escalated";
+export type RoutingDecision = "ready_for_processing" | "needs_review" | "blocked_or_incomplete";
 
 const STATUS_LABEL: Record<PackageStatus, string> = {
   uploaded: "Uploaded",
@@ -38,15 +38,15 @@ const STATUS_TONE: Record<PackageStatus, "neutral" | "info" | "success" | "warni
 };
 
 const DECISION_LABEL: Record<RoutingDecision, string> = {
-  approved: "Approved",
-  flagged: "Flagged",
-  escalated: "Escalated",
+  ready_for_processing: "Ready for processing",
+  needs_review: "Needs manual review",
+  blocked_or_incomplete: "Blocked or incomplete",
 };
 
 const DECISION_TONE: Record<RoutingDecision, "success" | "warning" | "danger"> = {
-  approved: "success",
-  flagged: "warning",
-  escalated: "danger",
+  ready_for_processing: "success",
+  needs_review: "warning",
+  blocked_or_incomplete: "danger",
 };
 
 const TONE_CLASS: Record<string, string> = {

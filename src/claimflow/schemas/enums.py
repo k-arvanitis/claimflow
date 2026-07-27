@@ -19,9 +19,9 @@ class ExtractionRunStatus(str, Enum):
 
 
 class DecisionType(str, Enum):
-    APPROVED = "approved"
-    FLAGGED = "flagged"
-    ESCALATED = "escalated"
+    READY_FOR_PROCESSING = "ready_for_processing"
+    NEEDS_REVIEW = "needs_review"
+    BLOCKED_OR_INCOMPLETE = "blocked_or_incomplete"
 
 
 class ReviewActionType(str, Enum):

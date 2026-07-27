@@ -58,16 +58,21 @@ export default function DashboardPage() {
             tone="warning"
           />
           <MetricCard
-            label="Approved"
+            label="Ready for processing"
             value={summary.data.approved}
-            href="/packages?decision=approved"
+            href="/packages?decision=ready_for_processing"
             tone="success"
           />
-          <MetricCard label="Flagged" value={summary.data.flagged} href="/reviews?decision=flagged" tone="warning" />
           <MetricCard
-            label="Escalated"
+            label="Needs review"
+            value={summary.data.flagged}
+            href="/reviews?decision=needs_review"
+            tone="warning"
+          />
+          <MetricCard
+            label="Blocked or incomplete"
             value={summary.data.escalated}
-            href="/reviews?decision=escalated"
+            href="/reviews?decision=blocked_or_incomplete"
             tone="danger"
           />
           <MetricCard

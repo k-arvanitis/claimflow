@@ -39,7 +39,7 @@ export function PackageHeader({
   failureCount: number;
   createdAt: string;
   updatedAt: string;
-  onRecordDecision: (decision: "approved" | "flagged" | "escalated") => void;
+  onRecordDecision: (decision: "ready_for_processing" | "needs_review" | "blocked_or_incomplete") => void;
 }) {
   const router = useRouter();
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -81,14 +81,14 @@ export function PackageHeader({
             Export
           </Button>
           <Separator orientation="vertical" className="h-6" />
-          <Button variant="outline" size="sm" className="border-success text-success hover:bg-success/10" onClick={() => onRecordDecision("approved")}>
-            Approve
+          <Button variant="outline" size="sm" className="border-success text-success hover:bg-success/10" onClick={() => onRecordDecision("ready_for_processing")}>
+            Ready for processing
           </Button>
-          <Button variant="outline" size="sm" className="border-warning text-warning-foreground hover:bg-warning/10" onClick={() => onRecordDecision("flagged")}>
-            Flag
+          <Button variant="outline" size="sm" className="border-warning text-warning-foreground hover:bg-warning/10" onClick={() => onRecordDecision("needs_review")}>
+            Needs review
           </Button>
-          <Button variant="outline" size="sm" className="border-destructive text-destructive hover:bg-destructive/10" onClick={() => onRecordDecision("escalated")}>
-            Escalate
+          <Button variant="outline" size="sm" className="border-destructive text-destructive hover:bg-destructive/10" onClick={() => onRecordDecision("blocked_or_incomplete")}>
+            Blocked
           </Button>
           <Button variant="ghost" size="icon" aria-label="Delete package" onClick={() => setConfirmDelete(true)}>
             <Trash2 />

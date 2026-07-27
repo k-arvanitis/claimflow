@@ -106,9 +106,9 @@ def test_create_policy_evidence_and_decision():
     assert json.loads(evidence[0].citations_json) == ["policy excerpt [1]"]
 
     decision = db.create_decision(
-        session, pkg.id, "flagged", ["diagnosis_codes: not a recognized code"]
+        session, pkg.id, "needs_review", ["diagnosis_codes: not a recognized code"]
     )
-    assert decision.decision == "flagged"
+    assert decision.decision == "needs_review"
     assert json.loads(decision.review_reasons_json) == [
         "diagnosis_codes: not a recognized code"
     ]
@@ -217,7 +217,7 @@ def test_persist_extraction_result_writes_all_rows():
                 "citations": ["policy excerpt [1]"],
             },
         ],
-        "decision": "flagged",
+        "decision": "needs_review",
         "review_reasons": [
             "diagnosis_codes: 'XXXXX' is not a recognized ICD-10-CM code"
         ],
@@ -291,7 +291,7 @@ def test_delete_package_cascades():
             {"question": "q", "answer": "a", "citations": []},
         ],
     )
-    db.create_decision(session, pkg.id, "flagged", ["bad code"])
+    db.create_decision(session, pkg.id, "needs_review", ["bad code"])
     db.record_review_action(session, run.id, "patient_name", "approve")
 
     pkg_id, doc_id, run_id = pkg.id, doc.id, run.id
@@ -373,8 +373,8 @@ def test_document_and_field_lookups():
 def test_decision_and_audit_lookups():
     session = _make_session()
     pkg = db.create_package(session, str(uuid.uuid4()))
-    db.create_decision(session, pkg.id, "flagged", ["first"])
-    latest = db.create_decision(session, pkg.id, "escalated", ["second"])
+    db.create_decision(session, pkg.id, "needs_review", ["first"])
+    latest = db.create_decision(session, pkg.id, "blocked_or_incomplete", ["second"])
     db.log_audit(session, pkg.id, "api", "upload")
 
     assert db.latest_decision_for_package(session, pkg.id).id == latest.id

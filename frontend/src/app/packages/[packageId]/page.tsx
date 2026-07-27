@@ -36,7 +36,9 @@ export default function PackageWorkspacePage({ params }: { params: Promise<{ pac
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
   const [evidence, setEvidence] = useState<SelectedEvidence | null>(null);
   const [tab, setTab] = useState("overview");
-  const [pendingDecision, setPendingDecision] = useState<"approved" | "flagged" | "escalated" | null>(null);
+  const [pendingDecision, setPendingDecision] = useState<
+    "ready_for_processing" | "needs_review" | "blocked_or_incomplete" | null
+  >(null);
   const [reviewed, setReviewed] = useState<ReviewState>({});
 
   const result = pkg.data?.result as PackageResult | null | undefined;

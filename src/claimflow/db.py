@@ -216,7 +216,7 @@ class Decision(Base):
     package_id: Mapped[str] = mapped_column(
         ForeignKey("packages.id", ondelete="CASCADE"), index=True
     )
-    decision: Mapped[str] = mapped_column(String)  # approved|flagged|escalated
+    decision: Mapped[str] = mapped_column(String)  # ready_for_processing|needs_review|blocked_or_incomplete
     review_reasons_json: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
@@ -799,9 +799,9 @@ def compute_dashboard_summary(session: Session) -> dict:
         latest = latest_decision_for_package(session, pkg.id)
         if latest is None:
             continue
-        if latest.decision == "flagged":
+        if latest.decision == "needs_review":
             flagged += 1
-        elif latest.decision == "escalated":
+        elif latest.decision == "blocked_or_incomplete":
             escalated += 1
 
     decided_total = approved + flagged + escalated
@@ -945,7 +945,7 @@ def list_flagged_packages(session: Session) -> list[Package]:
     flagged_ids = [
         pid
         for pid, decision in latest_by_package.items()
-        if decision.decision in ("flagged", "escalated")
+        if decision.decision in ("needs_review", "blocked_or_incomplete")
     ]
     if not flagged_ids:
         return []

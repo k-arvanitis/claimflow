@@ -21,8 +21,8 @@ describe("DecisionBadge", () => {
   });
 
   it("shows the decision label when present", () => {
-    render(<DecisionBadge decision="escalated" />);
-    expect(screen.getByText("Escalated")).toBeInTheDocument();
+    render(<DecisionBadge decision="blocked_or_incomplete" />);
+    expect(screen.getByText("Blocked or incomplete")).toBeInTheDocument();
   });
 });
 

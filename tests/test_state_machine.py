@@ -131,7 +131,7 @@ def test_run_claim_classifies_structured_error_as_processing_error(tmp_path):
 def test_run_claim_classifies_approved_decision_as_completed(tmp_path):
     graph = MagicMock()
     graph.invoke.return_value = {
-        "decision": "approved", "extraction_data": {}, "domain": "cms1500", "documents": [],
+        "decision": "ready_for_processing", "extraction_data": {}, "domain": "cms1500", "documents": [],
         "extraction_fields": [], "validation_failures": [], "policy_answers": [],
         "review_reasons": [], "error": None,
     }
@@ -150,7 +150,7 @@ def test_run_claim_classifies_approved_decision_as_completed(tmp_path):
 def test_run_claim_classifies_flagged_decision_as_review_ready(tmp_path):
     graph = MagicMock()
     graph.invoke.return_value = {
-        "decision": "flagged", "extraction_data": {}, "domain": "cms1500", "documents": [],
+        "decision": "needs_review", "extraction_data": {}, "domain": "cms1500", "documents": [],
         "extraction_fields": [], "validation_failures": [], "policy_answers": [],
         "review_reasons": ["low confidence"], "error": None,
     }

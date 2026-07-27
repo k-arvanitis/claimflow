@@ -46,7 +46,7 @@ class ClaimState(TypedDict):
     policy_answers: list[PolicyAnswer]
 
     # Review output
-    decision: Literal["approved", "flagged", "escalated"] | None
+    decision: Literal["ready_for_processing", "needs_review", "blocked_or_incomplete"] | None
     review_reasons: list[str]
 
     # Error passthrough

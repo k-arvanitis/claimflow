@@ -90,10 +90,10 @@ def test_filter_by_domain(session):
 
 
 def test_filter_by_decision(session):
-    _seed(session, "pkg-a", "completed", decision="approved")
-    _seed(session, "pkg-b", "review_ready", decision="escalated")
+    _seed(session, "pkg-a", "completed", decision="ready_for_processing")
+    _seed(session, "pkg-b", "review_ready", decision="blocked_or_incomplete")
 
-    rows, total = db.list_packages_filtered(session, decision="escalated")
+    rows, total = db.list_packages_filtered(session, decision="blocked_or_incomplete")
     assert total == 1
     assert rows[0].id == "pkg-b"
 
@@ -157,7 +157,7 @@ def test_read_model_includes_domain_decision_confidence_and_counts(session):
         "review_ready",
         domain="cms1500",
         confidence=0.6,
-        decision="flagged",
+        decision="needs_review",
         rule="npi_format",
     )
 
@@ -165,7 +165,7 @@ def test_read_model_includes_domain_decision_confidence_and_counts(session):
     model = db.package_read_model(session, rows[0])
 
     assert model["domain"] == "cms1500"
-    assert model["decision"] == "flagged"
+    assert model["decision"] == "needs_review"
     assert model["overall_confidence"] == 0.6
     assert model["document_count"] == 1
     assert model["validation_failure_count"] == 1

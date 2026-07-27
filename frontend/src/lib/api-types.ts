@@ -411,7 +411,7 @@ export interface components {
          * DecisionType
          * @enum {string}
          */
-        DecisionType: "approved" | "flagged" | "escalated";
+        DecisionType: "ready_for_processing" | "needs_review" | "blocked_or_incomplete";
         /** DocumentReclassifyRequest */
         DocumentReclassifyRequest: {
             doc_type: components["schemas"]["DocumentType"];

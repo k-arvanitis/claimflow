@@ -289,7 +289,7 @@ def _run_claim(
 
         if response["error"]:
             final_status = "processing_error"
-        elif response["decision"] == "approved":
+        elif response["decision"] == "ready_for_processing":
             final_status = "completed"
         else:
             final_status = "review_ready"
@@ -984,7 +984,7 @@ async def submit_package_decision(package_id: str, body: DecisionRequest):
         )
 
         target_status = (
-            "completed" if decision.decision == "approved" else "review_ready"
+            "completed" if decision.decision == "ready_for_processing" else "review_ready"
         )
         if pkg.status != target_status:
             db.transition_package_status(

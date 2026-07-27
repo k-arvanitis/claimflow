@@ -17,7 +17,13 @@ import { AlertTriangle } from "lucide-react";
 import { useRecordDecision } from "@/lib/queries";
 import { toast } from "sonner";
 
-type PendingDecision = "approved" | "flagged" | "escalated" | null;
+type PendingDecision = "ready_for_processing" | "needs_review" | "blocked_or_incomplete" | null;
+
+const DECISION_LABEL: Record<Exclude<PendingDecision, null>, string> = {
+  ready_for_processing: "Ready for processing",
+  needs_review: "Needs manual review",
+  blocked_or_incomplete: "Blocked or incomplete",
+};
 
 export function DecisionDialog({
   packageId,
@@ -35,18 +41,19 @@ export function DecisionDialog({
   const [reason, setReason] = useState("");
   const record = useRecordDecision(packageId);
 
-  const requiresReason = pending === "escalated";
-  const showFailureWarning = pending === "approved" && unresolvedFailureCount > 0;
-  const showIncompleteWarning = pending === "approved" && status !== "review_ready" && status !== "completed";
+  const requiresReason = pending === "blocked_or_incomplete";
+  const showFailureWarning = pending === "ready_for_processing" && unresolvedFailureCount > 0;
+  const showIncompleteWarning =
+    pending === "ready_for_processing" && status !== "review_ready" && status !== "completed";
 
   return (
     <AlertDialog open={pending !== null} onOpenChange={(open) => !open && onClose()}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>
-            {pending === "approved" && "Approve this package?"}
-            {pending === "flagged" && "Flag this package for review?"}
-            {pending === "escalated" && "Escalate this package?"}
+            {pending === "ready_for_processing" && "Mark this package ready for processing?"}
+            {pending === "needs_review" && "Send this package for manual review?"}
+            {pending === "blocked_or_incomplete" && "Mark this package blocked or incomplete?"}
           </AlertDialogTitle>
           <AlertDialogDescription>
             This records a routing decision. The backend remains the final authority — recording a decision does
@@ -73,7 +80,7 @@ export function DecisionDialog({
 
         {requiresReason && (
           <Textarea
-            placeholder="Reason for escalation (required)"
+            placeholder="Reason for blocking (required)"
             value={reason}
             onChange={(e) => setReason(e.target.value)}
           />
@@ -90,7 +97,7 @@ export function DecisionDialog({
                   decision: pending,
                   reviewReasons: reason.trim() ? [reason.trim()] : [],
                 });
-                toast.success(`Package ${pending}`);
+                toast.success(`Package ${DECISION_LABEL[pending]}`);
                 onClose();
                 setReason("");
               } catch {

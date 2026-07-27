@@ -20,7 +20,16 @@ db.init_db()
 st.set_page_config(page_title="ClaimFlow", page_icon="📋", layout="wide")
 st.title("ClaimFlow — Document Intelligence Review")
 
-_DECISION_COLOR = {"approved": "green", "flagged": "orange", "escalated": "red"}
+_DECISION_COLOR = {
+    "ready_for_processing": "green",
+    "needs_review": "orange",
+    "blocked_or_incomplete": "red",
+}
+_DECISION_LABEL = {
+    "ready_for_processing": "Ready for processing",
+    "needs_review": "Needs manual review",
+    "blocked_or_incomplete": "Blocked or incomplete",
+}
 _DOMAIN_LABEL = {"cms1500": "Health Insurance (CMS-1500)", "xactimate": "Property Insurance (Xactimate)", "loan": "SBA Loan Application"}
 
 
@@ -129,7 +138,7 @@ if run_button:
             db.persist_extraction_result(session, package_id, result)
             if result.get("error"):
                 final_status = "processing_error"
-            elif result.get("decision") == "approved":
+            elif result.get("decision") == "ready_for_processing":
                 final_status = "completed"
             else:
                 final_status = "review_ready"
@@ -152,17 +161,18 @@ result = st.session_state["result"]
 if result:
     decision = result.get("decision") or "unknown"
     color = _DECISION_COLOR.get(decision, "grey")
+    decision_label = _DECISION_LABEL.get(decision, decision.upper())
     domain_key = result.get("domain") or "unknown"
     domain_label = _DOMAIN_LABEL.get(domain_key, domain_key)
     confidence = result.get("extraction_overall_confidence")
 
     # Header row
     col1, col2, col3 = st.columns(3)
-    col1.metric("Decision", decision.upper())
+    col1.metric("Decision", decision_label)
     col2.metric("Domain", domain_label)
     col3.metric("Confidence", f"{confidence:.0%}" if confidence is not None else "—")
 
-    st.markdown(f"**Status:** :{color}[{decision.upper()}]")
+    st.markdown(f"**Status:** :{color}[{decision_label}]")
     st.caption("Human review is triggered only for low-confidence, contradictory, or high-risk fields.")
 
     if result.get("error"):

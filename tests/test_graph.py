@@ -524,7 +524,7 @@ def test_review_node_approves_clean_claim():
         "error": None,
     }
     result = review_node(state)
-    assert result["decision"] == "approved"
+    assert result["decision"] == "ready_for_processing"
     assert result["review_reasons"] == []
 
 
@@ -550,7 +550,7 @@ def test_review_node_flags_validation_failures():
         "error": None,
     }
     result = review_node(state)
-    assert result["decision"] == "flagged"
+    assert result["decision"] == "needs_review"
     assert len(result["review_reasons"]) > 0
 
 
@@ -572,7 +572,25 @@ def test_review_node_escalates_low_confidence():
         "error": None,
     }
     result = review_node(state)
-    assert result["decision"] == "escalated"
+    assert result["decision"] == "blocked_or_incomplete"
+
+
+def test_review_node_uses_safe_routing_labels():
+    from claimflow.nodes.review import review_node
+
+    clean = {"extraction_overall_confidence": 0.95, "validation_failures": []}
+    assert review_node(clean)["decision"] == "ready_for_processing"
+
+    flagged = {
+        "extraction_overall_confidence": 0.95,
+        "validation_failures": [
+            {"field": "x", "rule": "mandatory", "reason": "missing", "severity": "error", "policy_required": False}
+        ],
+    }
+    assert review_node(flagged)["decision"] == "needs_review"
+
+    low_confidence = {"extraction_overall_confidence": 0.1, "validation_failures": []}
+    assert review_node(low_confidence)["decision"] == "blocked_or_incomplete"
 
 
 def test_graph_runs_end_to_end(tmp_path):
@@ -628,7 +646,7 @@ def test_graph_runs_end_to_end(tmp_path):
             config={"configurable": {"thread_id": "test"}},
         )
 
-    assert result["decision"] in ("approved", "flagged", "escalated")
+    assert result["decision"] in ("ready_for_processing", "needs_review", "blocked_or_incomplete")
     assert result["documents"]
 
 

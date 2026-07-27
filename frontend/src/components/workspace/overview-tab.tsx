@@ -28,7 +28,7 @@ export function OverviewTab({
   reviewed: ReviewState;
   ocrWarnings: string[];
   onGoToTab: (tab: string) => void;
-  onRecordDecision: (decision: "approved" | "flagged" | "escalated") => void;
+  onRecordDecision: (decision: "ready_for_processing" | "needs_review" | "blocked_or_incomplete") => void;
 }) {
   const reviewedCount = Object.keys(reviewed).length;
   const totalFields = fields.filter((f) => !f.parent_field).length;
@@ -95,7 +95,7 @@ export function OverviewTab({
               Re-run validation
             </Button>
           )}
-          <Button variant="outline" size="sm" onClick={() => onRecordDecision("approved")}>
+          <Button variant="outline" size="sm" onClick={() => onRecordDecision("ready_for_processing")}>
             <Gavel data-icon="inline-start" />
             Record decision
           </Button>

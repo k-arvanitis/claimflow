@@ -44,7 +44,7 @@ def test_full_package_lifecycle():
             {"field": "patient_dob", "rule": "mandatory", "reason": "missing"}
         ],
         "policy_answers": [],
-        "decision": "flagged",
+        "decision": "needs_review",
         "review_reasons": ["low confidence"],
         "error": None,
     }
@@ -119,10 +119,10 @@ def test_full_package_lifecycle():
 
             # reviewer records the final decision
             decision = client.post(
-                f"/packages/{package_id}/decision", json={"decision": "approved"}
+                f"/packages/{package_id}/decision", json={"decision": "ready_for_processing"}
             )
             assert decision.status_code == 200
-            assert decision.json()["decision"] == "approved"
+            assert decision.json()["decision"] == "ready_for_processing"
             assert client.get(f"/packages/{package_id}").json()["status"] == "completed"
 
             # audit trail recorded the whole journey
@@ -141,7 +141,7 @@ def test_full_package_lifecycle():
             export = client.get(f"/packages/{package_id}/export")
             assert export.status_code == 200
             export_body = export.json()
-            assert export_body["decision"] == "approved"
+            assert export_body["decision"] == "ready_for_processing"
             patient_name = next(
                 field
                 for field in export_body["extraction_fields"]

@@ -32,7 +32,7 @@ describe("PackageQueue", () => {
             created_at: "2026-07-13T12:00:00Z",
             updated_at: "2026-07-13T12:05:00Z",
             domain: "cms1500",
-            decision: "flagged",
+            decision: "needs_review",
             overall_confidence: 0.6,
             document_count: 1,
             validation_failure_count: 1,
@@ -47,7 +47,7 @@ describe("PackageQueue", () => {
     render(withQueryClient(<PackageQueue mode="packages" />));
     expect(await screen.findByText("cms1500")).toBeInTheDocument();
     expect(screen.getByText("Ready for review")).toBeInTheDocument();
-    expect(screen.getByText("Flagged")).toBeInTheDocument();
+    expect(screen.getByText("Needs manual review")).toBeInTheDocument();
   });
 
   it("shows a backend error state", async () => {

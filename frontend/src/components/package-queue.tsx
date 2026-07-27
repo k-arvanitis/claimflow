@@ -49,7 +49,7 @@ import { toast } from "sonner";
 
 const DOMAINS = ["cms1500", "eob", "medicare_summary_notice", "xactimate", "declarations_page", "loan", "sba_form_413", "sba_form_2202"];
 const STATUSES = ["queued", "processing", "review_ready", "completed", "processing_error", "validation_error", "retrieval_error"];
-const DECISIONS = ["approved", "flagged", "escalated"];
+const DECISIONS = ["ready_for_processing", "needs_review", "blocked_or_incomplete"];
 const SORTS = [
   { value: "-created_at", label: "Newest first" },
   { value: "created_at", label: "Oldest first" },
