@@ -289,6 +289,8 @@ def _validate(data: dict) -> list[ValidationFailure]:
                     field=field,
                     rule="mandatory",
                     reason=f"{field} is required but missing or empty",
+                    severity="error",
+                    policy_required=False,
                 )
             )
 
@@ -305,6 +307,8 @@ def _validate(data: dict) -> list[ValidationFailure]:
                 field="billing_provider_npi",
                 rule="mandatory",
                 reason=f"'{npi}' does not look like a real NPI — treating as missing",
+                severity="error",
+                policy_required=True,  # NPI format has a question_template + field-name special case
             )
         )
 
@@ -315,6 +319,8 @@ def _validate(data: dict) -> list[ValidationFailure]:
                     field="diagnosis_codes",
                     rule="icd10_lookup",
                     reason=f"'{code}' is not a recognized ICD-10-CM code",
+                    severity="error",
+                    policy_required=True,
                 )
             )
 
@@ -328,6 +334,8 @@ def _validate(data: dict) -> list[ValidationFailure]:
                     field="service_lines",
                     rule="cpt_lookup",
                     reason=f"CPT '{cpt}' is not a recognized procedure code",
+                    severity="error",
+                    policy_required=True,
                 )
             )
 
@@ -340,6 +348,8 @@ def _validate(data: dict) -> list[ValidationFailure]:
                     field="total_charge",
                     rule="arithmetic",
                     reason=f"Line sum ${computed} does not match total charge ${total}",
+                    severity="warning",
+                    policy_required=True,
                 )
             )
     except InvalidOperation:
@@ -348,6 +358,8 @@ def _validate(data: dict) -> list[ValidationFailure]:
                 field="total_charge",
                 rule="arithmetic",
                 reason="Could not parse charge amounts as decimal numbers",
+                severity="warning",
+                policy_required=True,
             )
         )
 
@@ -360,6 +372,8 @@ def _validate(data: dict) -> list[ValidationFailure]:
                     field="service_lines",
                     rule="date_window",
                     reason=f"Date of service {line['date_of_service']} is in the future",
+                    severity="error",
+                    policy_required=False,
                 )
             )
 
@@ -513,6 +527,8 @@ def _validate_eob(data: dict) -> list[ValidationFailure]:
                     field=field,
                     rule="mandatory",
                     reason=f"{field} is required but missing or empty",
+                    severity="error",
+                    policy_required=False,
                 )
             )
 
@@ -524,6 +540,8 @@ def _validate_eob(data: dict) -> list[ValidationFailure]:
                 field="is_bill",
                 rule="not_a_bill",
                 reason="EOB/MSN documents are informational, not bills — is_bill=True is unexpected",
+                severity="error",
+                policy_required=False,
             )
         )
 
@@ -541,6 +559,8 @@ def _validate_eob(data: dict) -> list[ValidationFailure]:
                         field=field,
                         rule="negative_amount",
                         reason=f"{field} cannot be negative",
+                        severity="error",
+                        policy_required=False,
                     )
                 )
         except (TypeError, ValueError):
@@ -558,6 +578,8 @@ def _validate_eob(data: dict) -> list[ValidationFailure]:
                         field="provider_charges",
                         rule="amount_consistency",
                         reason=f"provider_charges ${provider_charges} is less than allowed_charges ${allowed_charges}",
+                        severity="warning",
+                        policy_required=False,
                     )
                 )
         except (TypeError, ValueError):
@@ -570,6 +592,8 @@ def _validate_eob(data: dict) -> list[ValidationFailure]:
                 field="claim_number",
                 rule="mandatory",
                 reason=f"'{claim_number}' has no digits — looks like a placeholder, not a claim number",
+                severity="error",
+                policy_required=False,
             )
         )
 
@@ -580,6 +604,8 @@ def _validate_eob(data: dict) -> list[ValidationFailure]:
                 field="service_date",
                 rule="date_window",
                 reason="Service date is in the future",
+                severity="error",
+                policy_required=False,
             )
         )
 

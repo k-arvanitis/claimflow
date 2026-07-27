@@ -180,6 +180,8 @@ class ValidationFailure(Base):
     field: Mapped[str] = mapped_column(String)
     rule: Mapped[str] = mapped_column(String)
     reason: Mapped[str] = mapped_column(Text)
+    severity: Mapped[str] = mapped_column(String, default="error")
+    policy_required: Mapped[bool] = mapped_column(default=False)
     superseded: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
@@ -473,6 +475,8 @@ def create_validation_failures(
             field=f["field"],
             rule=f["rule"],
             reason=f["reason"],
+            severity=f.get("severity", "error"),
+            policy_required=f.get("policy_required", False),
         )
         for f in failures
     ]

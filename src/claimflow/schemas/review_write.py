@@ -28,6 +28,8 @@ class ValidationFailureItem(BaseModel):
     field: str
     rule: str
     reason: str
+    severity: str
+    policy_required: bool
 
 
 class ValidationRerunResponse(BaseModel):

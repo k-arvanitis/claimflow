@@ -62,7 +62,8 @@ def _validate(data: dict) -> list[ValidationFailure]:
         val = data.get(field)
         if val is None or (isinstance(val, str) and not val.strip()):
             failures.append(ValidationFailure(field=field, rule="mandatory",
-                reason=f"{field} is required but missing or empty"))
+                reason=f"{field} is required but missing or empty",
+                severity="error", policy_required=False))
 
     # A real EIN/SSN is digits and dashes only. Models asked to extract a blank tax ID field
     # sometimes echo the format hint (e.g. "XX-XXXXXXX") back as if it were the real value —
@@ -70,7 +71,8 @@ def _validate(data: dict) -> list[ValidationFailure]:
     tax_id = data.get("tax_id")
     if tax_id and re.search(r"[A-Za-z]", str(tax_id)):
         failures.append(ValidationFailure(field="tax_id", rule="mandatory",
-            reason=f"'{tax_id}' looks like a placeholder pattern, not a real tax ID"))
+            reason=f"'{tax_id}' looks like a placeholder pattern, not a real tax ID",
+            severity="error", policy_required=False))
 
     # A legal person's name doesn't contain business-entity markers. Models asked to extract
     # a blank applicant_name field sometimes substitute the business name from elsewhere on the
@@ -78,14 +80,16 @@ def _validate(data: dict) -> list[ValidationFailure]:
     applicant_name = data.get("applicant_name")
     if applicant_name and re.search(_BUSINESS_ENTITY_RE, str(applicant_name), re.IGNORECASE):
         failures.append(ValidationFailure(field="applicant_name", rule="mandatory",
-            reason=f"'{applicant_name}' looks like a business name, not a person's name"))
+            reason=f"'{applicant_name}' looks like a business name, not a person's name",
+            severity="error", policy_required=False))
 
     # Loan amount must be positive
     try:
         amt = float(data.get("loan_amount_requested") or 0)
         if amt <= 0:
             failures.append(ValidationFailure(field="loan_amount_requested", rule="positive_amount",
-                reason="Loan amount must be greater than zero"))
+                reason="Loan amount must be greater than zero",
+                severity="error", policy_required=True))
     except (TypeError, ValueError):
         pass
 
@@ -96,14 +100,16 @@ def _validate(data: dict) -> list[ValidationFailure]:
         if gross is not None and net is not None:
             if float(net) > float(gross):
                 failures.append(ValidationFailure(field="net_income", rule="income_consistency",
-                    reason=f"Net income ${net} exceeds gross revenue ${gross}"))
+                    reason=f"Net income ${net} exceeds gross revenue ${gross}",
+                    severity="warning", policy_required=True))
     except (TypeError, ValueError):
         pass
 
     # Signature required
     if data.get("signature_on_file") is False:
         failures.append(ValidationFailure(field="signature_on_file", rule="signature_required",
-            reason="Application requires a valid signature"))
+            reason="Application requires a valid signature",
+            severity="error", policy_required=True))
 
     return failures
 
@@ -183,12 +189,14 @@ def _validate_form_413(data: dict) -> list[ValidationFailure]:
     applicant_name = data.get("applicant_name")
     if applicant_name and re.search(_BUSINESS_ENTITY_RE, str(applicant_name), re.IGNORECASE):
         failures.append(ValidationFailure(field="applicant_name", rule="mandatory",
-            reason=f"'{applicant_name}' looks like a business name, not a person's name"))
+            reason=f"'{applicant_name}' looks like a business name, not a person's name",
+            severity="error", policy_required=False))
 
     as_of = _parse_date(data.get("as_of_date") or "")
     if as_of and as_of > date.today():
         failures.append(ValidationFailure(field="as_of_date", rule="date_window",
-            reason="As-of date is in the future"))
+            reason="As-of date is in the future",
+            severity="error", policy_required=False))
 
     amount_fields = [
         "cash_on_hand", "savings_accounts", "ira_retirement_accounts", "accounts_notes_receivable",
@@ -203,7 +211,8 @@ def _validate_form_413(data: dict) -> list[ValidationFailure]:
         try:
             if val is not None and float(val) < 0:
                 failures.append(ValidationFailure(field=field, rule="negative_amount",
-                    reason=f"{field} cannot be negative"))
+                    reason=f"{field} cannot be negative",
+                    severity="error", policy_required=False))
         except (TypeError, ValueError):
             pass
 
@@ -216,7 +225,8 @@ def _validate_form_413(data: dict) -> list[ValidationFailure]:
             if abs(computed - Decimal(str(net_worth))) > Decimal("1.00"):
                 failures.append(ValidationFailure(field="net_worth", rule="arithmetic",
                     reason=f"total_assets ${total_assets} minus total_liabilities ${total_liabilities} "
-                    f"does not equal net_worth ${net_worth}"))
+                    f"does not equal net_worth ${net_worth}",
+                    severity="warning", policy_required=False))
         except InvalidOperation:
             pass
 
@@ -272,7 +282,8 @@ def _validate_form_2202(data: dict) -> list[ValidationFailure]:
         try:
             if balance is not None and float(balance) < 0:
                 failures.append(ValidationFailure(field="liabilities", rule="negative_amount",
-                    reason=f"current_balance cannot be negative for '{liability.get('creditor_name')}'"))
+                    reason=f"current_balance cannot be negative for '{liability.get('creditor_name')}'",
+                    severity="error", policy_required=False))
         except (TypeError, ValueError):
             pass
 
@@ -280,7 +291,8 @@ def _validate_form_2202(data: dict) -> list[ValidationFailure]:
         try:
             if payment is not None and float(payment) < 0:
                 failures.append(ValidationFailure(field="liabilities", rule="negative_amount",
-                    reason=f"payment_amount cannot be negative for '{liability.get('creditor_name')}'"))
+                    reason=f"payment_amount cannot be negative for '{liability.get('creditor_name')}'",
+                    severity="error", policy_required=False))
         except (TypeError, ValueError):
             pass
 
@@ -288,7 +300,8 @@ def _validate_form_2202(data: dict) -> list[ValidationFailure]:
         maturity_date = _parse_date(liability.get("maturity_date") or "")
         if original_date and maturity_date and maturity_date < original_date:
             failures.append(ValidationFailure(field="liabilities", rule="date_window",
-                reason=f"maturity_date is before original_date for '{liability.get('creditor_name')}'"))
+                reason=f"maturity_date is before original_date for '{liability.get('creditor_name')}'",
+                severity="warning", policy_required=False))
 
         original_amount, current_balance = liability.get("original_amount"), balance
         status = str(liability.get("current_or_delinquent") or "").lower()
@@ -300,7 +313,8 @@ def _validate_form_2202(data: dict) -> list[ValidationFailure]:
                 if float(current_balance) > float(original_amount):
                     failures.append(ValidationFailure(field="liabilities", rule="amount_consistency",
                         reason=f"current_balance ${current_balance} exceeds original_amount "
-                        f"${original_amount} for '{liability.get('creditor_name')}'"))
+                        f"${original_amount} for '{liability.get('creditor_name')}'",
+                        severity="warning", policy_required=False))
             except (TypeError, ValueError):
                 pass
 
@@ -310,7 +324,8 @@ def _validate_form_2202(data: dict) -> list[ValidationFailure]:
             computed = sum(Decimal(str(liability.get("current_balance", "0"))) for liability in liabilities)
             if abs(computed - Decimal(str(total))) > Decimal("1.00"):
                 failures.append(ValidationFailure(field="total_current_balance", rule="arithmetic",
-                    reason=f"Liabilities sum ${computed} does not match total_current_balance ${total}"))
+                    reason=f"Liabilities sum ${computed} does not match total_current_balance ${total}",
+                    severity="warning", policy_required=False))
         except InvalidOperation:
             pass
 

@@ -175,3 +175,16 @@ def test_xactimate_rcv_includes_printed_overhead_profit_and_tax():
     )
 
     assert failures == []
+
+
+def test_validation_failures_carry_severity_and_policy_flag():
+    from claimflow.domains.loan import _validate
+
+    data = {
+        "applicant_name": None,  # triggers a mandatory/required failure
+    }
+    failures = _validate(data)
+    assert failures, "expected at least one failure from missing applicant_name"
+    for f in failures:
+        assert f["severity"] in ("error", "warning")
+        assert isinstance(f["policy_required"], bool)

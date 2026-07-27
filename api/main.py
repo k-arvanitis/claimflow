@@ -901,7 +901,13 @@ async def rerun_package_validation(package_id: str, body: ValidationRerunRequest
                 session,
                 run.id,
                 [
-                    {"field": f["field"], "rule": f["rule"], "reason": f["reason"]}
+                    {
+                        "field": f["field"],
+                        "rule": f["rule"],
+                        "reason": f["reason"],
+                        "severity": f["severity"],
+                        "policy_required": f["policy_required"],
+                    }
                     for f in failures
                 ],
             )
@@ -941,7 +947,13 @@ async def rerun_package_validation(package_id: str, body: ValidationRerunRequest
 
     return ValidationRerunResponse(
         validation_failures=[
-            ValidationFailureItem(field=f["field"], rule=f["rule"], reason=f["reason"])
+            ValidationFailureItem(
+                field=f["field"],
+                rule=f["rule"],
+                reason=f["reason"],
+                severity=f["severity"],
+                policy_required=f["policy_required"],
+            )
             for f in failures
         ],
         decision=new_decision,
@@ -1103,7 +1115,13 @@ async def export_package(package_id: str):
             domain=result.get("domain"),
             extraction_fields=exported_fields,
             validation_failures=[
-                ValidationFailureItem(field=f.field, rule=f.rule, reason=f.reason)
+                ValidationFailureItem(
+                    field=f.field,
+                    rule=f.rule,
+                    reason=f.reason,
+                    severity=f.severity,
+                    policy_required=f.policy_required,
+                )
                 for f in failures
             ],
             policy_answers=[

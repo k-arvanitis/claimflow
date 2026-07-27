@@ -13,6 +13,8 @@ class ValidationFailure(TypedDict):
     field: str
     rule: str
     reason: str
+    severity: Literal["error", "warning"]
+    policy_required: bool
 
 
 class PolicyAnswer(TypedDict):

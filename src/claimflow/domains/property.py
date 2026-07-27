@@ -103,6 +103,8 @@ def _validate(data: dict) -> list[ValidationFailure]:
                     field=field,
                     rule="mandatory",
                     reason=f"{field} is required but missing or empty",
+                    severity="error",
+                    policy_required=False,
                 )
             )
 
@@ -116,6 +118,8 @@ def _validate(data: dict) -> list[ValidationFailure]:
                 field="claim_number",
                 rule="mandatory",
                 reason=f"'{claim_number}' has no digits — looks like a name, not a claim number",
+                severity="error",
+                policy_required=False,
             )
         )
 
@@ -144,6 +148,8 @@ def _validate(data: dict) -> list[ValidationFailure]:
                         f"Line items sum ${computed:.2f} does not match printed line-item "
                         f"total ${subtotal:.2f}"
                     ),
+                    severity="warning",
+                    policy_required=True,
                 )
             )
         additions = sum(
@@ -161,6 +167,8 @@ def _validate(data: dict) -> list[ValidationFailure]:
                         f"Line subtotal plus overhead, profit, and tax "
                         f"${subtotal + additions:.2f} does not match RCV ${rcv:.2f}"
                     ),
+                    severity="warning",
+                    policy_required=True,
                 )
             )
     except InvalidOperation:
@@ -169,6 +177,8 @@ def _validate(data: dict) -> list[ValidationFailure]:
                 field="total_replacement_cost",
                 rule="arithmetic",
                 reason="Could not parse amount as decimal",
+                severity="warning",
+                policy_required=True,
             )
         )
 
@@ -183,6 +193,8 @@ def _validate(data: dict) -> list[ValidationFailure]:
                     field="actual_cash_value",
                     rule="acv_check",
                     reason=f"ACV ${acv:.2f} does not equal RCV ${rcv:.2f} minus depreciation ${dep:.2f}",
+                    severity="warning",
+                    policy_required=True,
                 )
             )
     except InvalidOperation:
@@ -196,6 +208,8 @@ def _validate(data: dict) -> list[ValidationFailure]:
                 field="date_of_loss",
                 rule="date_window",
                 reason="Date of loss is in the future",
+                severity="error",
+                policy_required=False,
             )
         )
 
@@ -209,6 +223,8 @@ def _validate(data: dict) -> list[ValidationFailure]:
                         field=field,
                         rule="negative_amount",
                         reason=f"{field} cannot be negative",
+                        severity="error",
+                        policy_required=True,
                     )
                 )
         except (TypeError, ValueError):
@@ -342,6 +358,8 @@ def _validate_declarations(data: dict) -> list[ValidationFailure]:
                     field=field,
                     rule="mandatory",
                     reason=f"{field} is required but missing or empty",
+                    severity="error",
+                    policy_required=False,
                 )
             )
 
@@ -352,6 +370,8 @@ def _validate_declarations(data: dict) -> list[ValidationFailure]:
                 field="policy_number",
                 rule="mandatory",
                 reason=f"'{policy_number}' has no digits — looks like a placeholder, not a policy number",
+                severity="error",
+                policy_required=False,
             )
         )
 
@@ -363,6 +383,8 @@ def _validate_declarations(data: dict) -> list[ValidationFailure]:
                 field="policy_period_start",
                 rule="date_window",
                 reason=f"Policy period start {data['policy_period_start']} is after end {data['policy_period_end']}",
+                severity="warning",
+                policy_required=False,
             )
         )
 
@@ -376,6 +398,8 @@ def _validate_declarations(data: dict) -> list[ValidationFailure]:
                 field="date_of_loss",
                 rule="date_window",
                 reason=f"Date of loss {data['date_of_loss']} falls outside the policy period",
+                severity="warning",
+                policy_required=False,
             )
         )
 
@@ -392,6 +416,8 @@ def _validate_declarations(data: dict) -> list[ValidationFailure]:
                 field="insured_address",
                 rule="address_consistency",
                 reason=f"Claim property address '{property_address}' does not fuzzy-match insured address '{insured_address}'",
+                severity="warning",
+                policy_required=False,
             )
         )
 
@@ -412,6 +438,8 @@ def _validate_declarations(data: dict) -> list[ValidationFailure]:
                         field=field,
                         rule="negative_amount",
                         reason=f"{field} cannot be negative",
+                        severity="error",
+                        policy_required=False,
                     )
                 )
         except (TypeError, ValueError):

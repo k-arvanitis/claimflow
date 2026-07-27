@@ -11,7 +11,8 @@ def validate_node(state: ClaimState) -> dict:
     if domain is None:
         return {"validation_failures": [
             ValidationFailure(field="domain", rule="mandatory",
-                reason=f"No validator registered for domain '{domain_key}'")
+                reason=f"No validator registered for domain '{domain_key}'",
+                severity="error", policy_required=False)
         ]}
 
     failures = domain.validate(data)
