@@ -201,8 +201,8 @@ def _summarize(results: list[dict]) -> dict:
     ev_with = sum(r["evidence_with"] for r in ok)
     ev_total = sum(r["evidence_total"] for r in ok)
     clean = [r for r in ok if not r["gt_errors"]]
-    false_pos = sum(1 for r in clean if r["decision"] == "flagged")
-    straight = sum(1 for r in ok if r["decision"] == "approved")
+    false_pos = sum(1 for r in clean if r["decision"] == "needs_review")
+    straight = sum(1 for r in ok if r["decision"] == "ready_for_processing")
 
     by_type: dict[str, list[int]] = {}
     for r in ok:
