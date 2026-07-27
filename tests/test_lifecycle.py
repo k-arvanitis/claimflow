@@ -119,7 +119,8 @@ def test_full_package_lifecycle():
 
             # reviewer records the final decision
             decision = client.post(
-                f"/packages/{package_id}/decision", json={"decision": "ready_for_processing"}
+                f"/packages/{package_id}/decision",
+                json={"decision": "ready_for_processing"},
             )
             assert decision.status_code == 200
             assert decision.json()["decision"] == "ready_for_processing"
@@ -190,7 +191,11 @@ def test_rerun_validation_reports_decision_changed_with_new_labels():
         "extraction_status": "review",
         "extraction_overall_confidence": 0.6,
         "validation_failures": [
-            {"field": "billing_provider_npi", "rule": "npi_checksum", "reason": "invalid checksum"}
+            {
+                "field": "billing_provider_npi",
+                "rule": "npi_checksum",
+                "reason": "invalid checksum",
+            }
         ],
         "policy_answers": [],
         "decision": "needs_review",

@@ -216,7 +216,9 @@ class Decision(Base):
     package_id: Mapped[str] = mapped_column(
         ForeignKey("packages.id", ondelete="CASCADE"), index=True
     )
-    decision: Mapped[str] = mapped_column(String)  # ready_for_processing|needs_review|blocked_or_incomplete
+    decision: Mapped[str] = mapped_column(
+        String
+    )  # ready_for_processing|needs_review|blocked_or_incomplete
     review_reasons_json: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)

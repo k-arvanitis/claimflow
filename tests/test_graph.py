@@ -584,7 +584,13 @@ def test_review_node_uses_safe_routing_labels():
     flagged = {
         "extraction_overall_confidence": 0.95,
         "validation_failures": [
-            {"field": "x", "rule": "mandatory", "reason": "missing", "severity": "error", "policy_required": False}
+            {
+                "field": "x",
+                "rule": "mandatory",
+                "reason": "missing",
+                "severity": "error",
+                "policy_required": False,
+            }
         ],
     }
     assert review_node(flagged)["decision"] == "needs_review"
@@ -646,7 +652,11 @@ def test_graph_runs_end_to_end(tmp_path):
             config={"configurable": {"thread_id": "test"}},
         )
 
-    assert result["decision"] in ("ready_for_processing", "needs_review", "blocked_or_incomplete")
+    assert result["decision"] in (
+        "ready_for_processing",
+        "needs_review",
+        "blocked_or_incomplete",
+    )
     assert result["documents"]
 
 
@@ -839,7 +849,10 @@ def test_search_uses_domain_pack_policy_collection_not_hardcoded_dict(monkeypatc
     from claimflow.nodes.retrieve import _search
 
     fake_pack = domains_base.Domain(
-        doc_type="_fake_domain", keywords=set(), spec=None, validate=lambda d: [],
+        doc_type="_fake_domain",
+        keywords=set(),
+        spec=None,
+        validate=lambda d: [],
         policy_collection="fake_collection",
     )
     domains_base.register(fake_pack)
