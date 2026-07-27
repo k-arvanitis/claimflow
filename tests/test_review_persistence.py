@@ -157,6 +157,30 @@ def test_rerun_persists_new_failures_and_supersedes_old(session):
     assert all(f.superseded for f in all_failures if f.field == "patient_dob")
 
 
+def test_severity_and_policy_required_survive_db_round_trip(session):
+    _seed_field(session)
+
+    db.create_validation_failures(
+        session,
+        "run1",
+        [
+            {
+                "field": "x",
+                "rule": "arithmetic",
+                "reason": "y",
+                "severity": "warning",
+                "policy_required": True,
+            }
+        ],
+    )
+
+    current = db.list_validation_failures_for_run(session, "run1", current_only=True)
+
+    assert len(current) == 1
+    assert current[0].severity == "warning"
+    assert current[0].policy_required is True
+
+
 def test_merge_reviewed_values_applies_scalar_and_nested_actions_once():
     machine = {
         "total_charge": 100.0,
