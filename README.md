@@ -1,12 +1,18 @@
 # ClaimFlow
 
-A production-style document-intelligence and validation pipeline for messy, multi-document claim packages. It ingests a folder of PDFs (born-digital or scanned), OCRs pages with no text layer, extracts structured fields with confidence and source evidence, validates the result against deterministic domain rules, and routes each package to an `approved`, `flagged`, or `escalated` decision. Human review is triggered by validation failures, low-confidence or conflicting extractions, and configured high-risk conditions.
+ClaimFlow is a configurable document-review and exception-routing system with a CMS-1500 reference implementation.
 
-For any field that fails validation, ClaimFlow also retrieves cited policy passages to support the reviewer's decision — a secondary step, not the point of the pipeline.
+**The problem:** claim and application packages arrive as messy, multi-document PDF bundles (born-digital or scanned) that need structured data pulled out, checked against domain rules, and routed to a human reviewer when something doesn't add up — without a black box either fabricating values or silently rubber-stamping bad ones.
+
+**The stable workflow**, the same seven stages regardless of domain:
+
+`upload → classify → OCR/extract → structured extraction with evidence → deterministic validation → conditional policy retrieval → routing recommendation → human review/audit`
+
+Human review is triggered by validation failures, low-confidence or conflicting extractions, and configured high-risk conditions. Routing labels (`ready_for_processing` / `needs_review` / `blocked_or_incomplete`) are a recommendation for a human reviewer — ClaimFlow does not claim to make a final approval, coverage, lending, or medical decision.
 
 Unlike a plain "PDF to JSON" extractor, ClaimFlow is built for workflows where extracted values have to be auditable and safe to act on downstream — not just plausible-looking.
 
-Supports three claim domains out of the box: **CMS-1500 health**, **Xactimate property damage**, and **SBA loan applications**.
+Ships with three claim domains out of the box: **CMS-1500 health**, **Xactimate property damage**, and **SBA loan applications**.
 
 **Supported inputs:** born-digital PDFs, scanned/image-only PDFs processed through [doc-intel](../doc-intel)'s configured OCR backend (PaddleOCR-VL by default, with LightOn and Tesseract as configurable fallback providers), standalone images (PNG/JPG/WEBP/TIFF/BMP), DOCX (converted to PDF via LibreOffice so it goes through the same page-based pipeline as everything else), and multi-document packages mixing any of these.
 
@@ -19,10 +25,29 @@ ClaimFlow is best suited for:
 - OCR + structured extraction from claim/application packages
 - deterministic validation of extracted values
 - human-in-the-loop review workflows
-- claim/application triage: approved / flagged / escalated
-- cited policy support for failed validation rules
+- claim/application triage: `ready_for_processing` / `needs_review` / `blocked_or_incomplete`
+- cited policy support for policy-relevant validation failures
 
 It is not a production HIPAA/compliance system as-is.
+
+## DomainPack: how a domain is configured
+
+Everything domain-specific — health, property, loan, and each document type within them — is defined by one `Domain` dataclass (the DomainPack, `src/claimflow/domains/base.py`) registered per document type. Its fields:
+
+- `doc_type`, `keywords` — classification identity
+- `spec` — the extraction schema (a doc-intel `SchemaSpec`)
+- `validate` — the deterministic validator function
+- `supporting_types` — related classification-only document types
+- `display_name`, `policy_collection`, `reviewer_guidance` — presentation/context
+- `retrieval_mode` — `"official_deterministic"` (CMS-1500 only) or `"llm_synthesis"` (every other domain)
+- `question_templates` — per-rule policy question templates, also what makes a failure `policy_required`
+- `confidence_threshold` / `escalation_threshold` — optional per-domain overrides of the global settings
+
+Eight packs are registered today: `cms1500`, `eob`, `medicare_summary_notice` (health, `src/claimflow/domains/health.py`); `xactimate`, `declarations_page` (property, `src/claimflow/domains/property.py`); `loan`, `sba_form_413`, `sba_form_2202` (loan, `src/claimflow/domains/loan.py`).
+
+**What's inspectable today, read-only:** `GET /domain-packs` lists every registered pack (key, display name, document types); `GET /domain-packs/{key}` returns its full detail — required/optional fields (derived from the Pydantic schema), confidence/escalation thresholds, policy collection, retrieval mode, and reviewer guidance.
+
+**What still requires editing code:** there is no schema editor, no rule-language interpreter, and no admin UI for defining a new domain — adding a validator, a new extraction field, or a new document type means editing the Python module that registers the pack. Domain-pack configuration is developer-controlled today, not admin-configurable; the inspector endpoints exist to make what's registered visible, not to let it be edited from outside code.
 
 ## Pipeline
 
@@ -34,7 +59,7 @@ It is not a production HIPAA/compliance system as-is.
 | Retrieve | Hybrid / source-grounded | Domain-filtered Qdrant search; deterministic official-source answers for CMS-1500; cross-encoder rerank + LLM synthesis for other domains |
 | Review | Deterministic | Confidence + failure thresholds → routing decision; human review is triggered by validation failures, low-confidence or conflicting extractions, and configured high-risk conditions |
 
-The Retrieve node is skipped when Validate finds no failures.
+Retrieve calls Qdrant only when at least one validation failure is `policy_required=True` (see [Validation rules](#validation-rules)) — it returns no policy answers, with no Qdrant call at all, when Validate finds no failures, or when every failure it found is a plain missing-field/arithmetic mismatch with no policy angle.
 
 ## Document classification
 
@@ -113,7 +138,9 @@ Streamlit's own review queue still offers, for reference:
 
 ## Validation rules
 
-Deterministic, not LLM self-verification — the same numbers, codes, and dates get the same result every run.
+Deterministic, not LLM self-verification — the same numbers, codes, and dates get the same result every run. A checksum, a lookup-table membership check, or an arithmetic reconciliation (line-item sum vs. printed total) has one correct answer; asking an LLM to re-check its own extraction risks it rationalizing a wrong value instead of catching it, and would make the same input non-reproducible across runs. Every validation failure carries a `severity` (`error` or `warning`) and a `policy_required` flag.
+
+**`policy_required` gates policy retrieval.** It's `True` only when a domain's `question_templates` has a matching entry for that rule (or for the CMS-1500 NPI-format special case) — i.e. when there's an actual policy citation to retrieve. A plain missing-required-field or an arithmetic-only mismatch (e.g. "line sum doesn't match total") is `policy_required=False` and never triggers a Qdrant lookup; `retrieve_node` filters to `policy_required=True` failures before calling Qdrant at all.
 
 | Domain | Example checks |
 |--------|----------------|
@@ -125,9 +152,9 @@ Deterministic, not LLM self-verification — the same numbers, codes, and dates 
 | Loan (SBA Form 413) | total assets − total liabilities = net worth (within tolerance), non-negative amounts, future as-of date, business name where a person's name is expected |
 | Loan (SBA Form 2202) | sum of current balances = reported total, current balance ≤ original amount (unless revolving/deferred), maturity date ≥ origination date |
 
-## Example: one package end to end
+## CMS-1500 demo flow: one package end to end
 
-A real run against `data/synthetic/health/package_004` (one input file, `claim.pdf` — a born-digital CMS-1500 form with a genuinely invalid injected diagnosis code):
+The CMS-1500 pack is ClaimFlow's reference implementation — the domain with the deepest validation and the only one with deterministic, officially-sourced policy answers. A real run against `data/synthetic/health/package_004` (one input file, `claim.pdf` — a born-digital CMS-1500 form with a genuinely invalid injected diagnosis code) through the seven-stage workflow:
 
 **1. Classified documents**
 
@@ -157,7 +184,7 @@ A real run against `data/synthetic/health/package_004` (one input file, `claim.p
 **4. Final decision**
 
 ```
-decision: flagged
+decision: needs_review
 review_reasons:
   - "diagnosis_codes: 'XXXXX' is not a recognized ICD-10-CM code"
 ```
@@ -166,7 +193,7 @@ review_reasons:
 
 ```json
 {
-  "decision": "flagged",
+  "decision": "needs_review",
   "domain": "cms1500",
   "fields": {
     "patient_name": { "original_value": "TAYLOR MICHAEL", "action": "approve", "final_value": "TAYLOR MICHAEL", "confidence": 1.0 },
@@ -236,7 +263,7 @@ ClaimFlow persists the package lifecycle rather than returning only a one-off pi
 - validation failures (superseded, not deleted, on revalidation — old failures stay queryable for audit)
 - policy evidence
 - review actions (per-field approve/edit/reject, keeping the machine value, reviewer correction, and note distinct)
-- package decisions (approved/flagged/escalated, one row per decision — a package can have more than one over its life)
+- package decisions (`ready_for_processing`/`needs_review`/`blocked_or_incomplete`, one row per decision — a package can have more than one over its life)
 - audit events (`audit_log` table — see [package deletion](#package-deletion-and-audit-retention) below)
 
 Machine-extracted values are retained separately from reviewer corrections and final approved values. Re-running validation (`POST /packages/{id}/validation/re-run`) uses the corrected values without deleting the original extraction or the prior validation-failure history — it marks the old failures `superseded=True` and inserts the new set.
@@ -250,7 +277,9 @@ uploaded → queued → processing → review_ready → completed
                               ↘ processing_error / validation_error / retrieval_error
 ```
 
-`status` (processing lifecycle) and `decision` (`approved` / `flagged` / `escalated`, the routing outcome) are stored and returned separately — a package's `status` becomes `review_ready` or `completed` regardless of which decision the routing step produced; `flagged`/`escalated` are workflow outcomes for a human reviewer, not final adjudications. Per-field reviewer actions (`approve`/`edit`/`reject`/`add`) are a third, distinct vocabulary — `ReviewActionType`.
+`status` (processing lifecycle) and `decision` (`ready_for_processing` / `needs_review` / `blocked_or_incomplete`, the routing outcome) are stored and returned separately — a package's `status` becomes `review_ready` or `completed` regardless of which decision the routing step produced; `needs_review`/`blocked_or_incomplete` are recommendations for a human reviewer, not final adjudications — ClaimFlow does not make a final approval/coverage/lending/medical decision. Per-field reviewer actions (`approve`/`edit`/`reject`/`add`) are a third, distinct vocabulary — `ReviewActionType`.
+
+`POST /packages/{id}/validation/re-run` re-runs the domain's real deterministic validator against the reviewer's corrected values and recomputes the routing decision, returning `decision`, `decision_changed`, and `previous_decision` — a correction can move a package from `needs_review` back to `ready_for_processing`, or the reverse.
 
 A package can be reprocessed (`POST /packages/{id}/process`) after document reclassification or a processing error; this is an atomic compare-and-swap on `status` (`try_start_processing`) so two concurrent `/process` calls can't both run the graph — the second gets a 409. A crash mid-`processing` is recovered at the next app startup (`recover_stale_processing_packages`) rather than left stuck.
 
@@ -299,7 +328,7 @@ GET  /reviews/queue                                    Paginated review queue �
 GET  /packages/{package_id}/review                     Fields + validation failures for one package's review
 POST /packages/{package_id}/fields/{field_id}/review    Submit a reviewer action (approve/edit/reject) for one field — idempotent, see above
 POST /packages/{package_id}/validation/re-run           Re-run the domain's real validator against corrected field values
-POST /packages/{package_id}/decision                    Record a routing decision (approved/flagged/escalated)
+POST /packages/{package_id}/decision                    Record a routing decision (ready_for_processing/needs_review/blocked_or_incomplete)
 ```
 
 Example — `GET /reviews/queue` item:
@@ -330,7 +359,7 @@ GET /dashboard/summary                         Precomputed operational counts (s
 GET /settings    Read-only operational config: thresholds, enabled domains, doc-intel/OCR provider, Qdrant target, Langfuse status — no secrets
 ```
 
-`GET /dashboard/summary` returns:
+`GET /dashboard/summary` returns (the `approved`/`flagged`/`escalated` keys are stable dashboard count field names, kept as-is across the routing-label rename above — `approved` counts packages with `status == completed`; `flagged`/`escalated` count `review_ready` packages whose latest recorded decision is `needs_review`/`blocked_or_incomplete`, not the old decision vocabulary):
 ```json
 {
   "total_packages": 132,
@@ -363,11 +392,13 @@ Key settings:
 | `DOC_INTEL_PROVIDER` | `anthropic` | Use `openai` + `DOC_INTEL_LLM_BASE_URL` for local vLLM |
 | `DOC_INTEL_TEMPERATURE` | `0.0` | Extraction defaults to greedy decoding for reproducibility, not creativity |
 | `QDRANT_URL` | `http://localhost:6339` | Qdrant endpoint |
-| `CONFIDENCE_THRESHOLD` | `0.75` | Below this → flagged |
-| `ESCALATION_THRESHOLD` | `0.50` | Below this → escalated |
+| `CONFIDENCE_THRESHOLD` | `0.75` | Below this → `needs_review` |
+| `ESCALATION_THRESHOLD` | `0.50` | Below this → `blocked_or_incomplete` |
 | `LANGFUSE_ENABLED` | `false` | Set `true` to enable tracing |
 
 ## Tests
+
+Verification runs at three distinct layers, and the numbers below shouldn't be read as interchangeable: **mocked-unit** (`tests/`, `doc-intel` mocked — fast, deterministic, runs in CI on every change), **local-integration** (`e2e-smoke.mjs`, `make eval-real-public` — real backend/DB/Qdrant, real HTTP, but synthetic or public fixture data), and **live-model** (`make eval` — a real self-hosted LLM in the loop, the only layer that measures actual extraction/grounding accuracy against a model).
 
 ```bash
 make test   # pytest
@@ -418,7 +449,7 @@ The synthetic eval above remains the controlled, end-to-end benchmark — it's t
 - **[SBA 7(a)/504 FOIA](https://data.sba.gov/en/dataset/7-a-504-foia)** (1 file, 373,984 rows), **[SBA PPP FOIA](https://data.sba.gov/en/dataset/ppp-foia)** (1 file), official **[SBA Form 1919](https://www.sba.gov/document/sba-form-1919-borrower-information-form)** template — loan validation and blank-template abstention testing
 - **FUNSD (OCR/layout) and RVL-CDIP (classification)** — these are domain-agnostic, "core mechanism" benchmarks and live in **doc-intel's own eval** instead (see its `TODO.md`), since they test OCR/classification quality independent of any ClaimFlow business domain
 
-**No PHI or private borrower/patient data is used anywhere.** Public structured datasets (SynPUF, FEMA IHP, SBA FOIA) are used for validation realism — real codes, amounts, and dates — not as stand-ins for completed private application packages. CPT validation is deliberately not shipped (AMA-licensed content); it's pluggable, and a licensed CPT dataset would be required for production use.
+**No PHI or private borrower/patient data is used anywhere.** Public structured datasets (SynPUF, FEMA IHP, SBA FOIA) are used for validation realism — real codes, amounts, and dates — not as stand-ins for completed private application packages. The licensed AMA CPT registry is deliberately not shipped or evaluated here — the CMS-1500 validator's `cpt_lookup` rule runs against a synthetic placeholder code range (`data/lookups/cpt.csv`), not the real CPT set; a licensed CPT dataset would be required for production use (see [Known limitations](#known-limitations)).
 
 ### Public structured-data validation checks
 
@@ -462,6 +493,9 @@ Every downloaded artifact is tracked in `eval/real_public/manifest.json` — sou
 
 - **Adding a new row to a nested list field (`service_lines`, `line_items`) isn't supported in the Next.js UI.** Doing this correctly needs the row's field schema (which columns, which types) that isn't exposed by any endpoint today; the button is present but disabled with an explanation, not hidden.
 - **Field-table columns overflow on narrow resizable-pane widths** in the Fields/Validation tabs (Confidence/Reason columns can get clipped at the default 3-pane split) — a real, observed layout issue, not yet fixed; widen the pane or add column truncation/tooltips.
+- **Non-CMS policy PDFs are self-authored demo text, not verified canonical sources.** Only `cms1500` retrieval uses `retrieval_mode="official_deterministic"` against the real CMS Medicare Claims Processing Manual and NPI fact sheet. Every other domain (EOB/MSN, Xactimate, declarations page, loan, SBA Forms 413/2202) uses `retrieval_mode="llm_synthesis"` over `health_policy.pdf`/`property_policy.pdf`/`loan_policy.pdf` — synthetic demonstration text, not insurer contracts, SBA rules, state insurance rules, or Verisk/Xactimate specifications. A source audit (PROGRESS.md Session N+8/N+9) found some of that synthetic text is affirmatively wrong (e.g. `loan_policy.pdf` claims a $5,000 SBA 7(a) minimum that doesn't exist; `property_policy.pdf` claims line-item sums must equal RCV and that negative line items are prohibited, both contradicted by real Xactimate usage). Non-CMS policy answers should be read as illustrative of the retrieval mechanism, not as grounded policy guidance.
+- **ICD-10/CPT lookups are not date-versioned.** `data/lookups/icd10.csv` is the current code set, not the code set in force on a given claim's service date — Session N+8 found this produces false positives against an older claim. `data/lookups/cpt.csv` is a synthetic numeric-range placeholder, not the licensed AMA CPT registry (see [Real/Public Evaluation](#realpublic-evaluation)) — it accepts codes that fall in-range but don't actually exist, and can't check payer-specific coverage status.
+- **This refactor added no schema editor or rule-language interpreter.** Domain-pack inspection (`GET /domain-packs`, `GET /domain-packs/{key}`) is read-only; defining a new domain, validator, or extraction hook still means editing the Python module that registers it (see [DomainPack](#domainpack-how-a-domain-is-configured)) — explicitly out of scope for this work, not a gap that snuck in.
 - **No real private claim-package evaluation yet.** The controlled end-to-end package eval uses synthetic generated packages with gold-labeled injected errors. The real/public eval layer uses public structured datasets, official blank templates, and a small number of public estimate PDFs for validation realism and selected extraction case studies — not private patient, claimant, or borrower packages.
 - **No production HIPAA compliance.** ClaimFlow records application-level workflow audit events (`GET /packages/{id}/audit`), but does not yet provide compliance-grade, tamper-evident audit logging, PHI-specific access auditing, encryption at rest, or a retention policy — don't point this at real patient/claimant data as-is.
 - **No production auth/RBAC.** The API and Streamlit UI have no authentication — anyone who can reach the port can submit and review claims.
