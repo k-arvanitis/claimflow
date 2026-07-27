@@ -772,6 +772,28 @@ def test_cms_policy_answer_is_deterministic_and_does_not_call_llm():
     assert "'ABC'" in answer["answer"]
 
 
+def test_search_uses_domain_pack_policy_collection_not_hardcoded_dict(monkeypatch):
+    from claimflow.domains import base as domains_base
+    from claimflow.nodes.retrieve import _search
+
+    fake_pack = domains_base.Domain(
+        doc_type="_fake_domain", keywords=set(), spec=None, validate=lambda d: [],
+        policy_collection="fake_collection",
+    )
+    domains_base.register(fake_pack)
+
+    captured = {}
+
+    class FakeQdrant:
+        def query(self, **kwargs):
+            captured["filter"] = kwargs["query_filter"]
+            return []
+
+    monkeypatch.setattr("claimflow.nodes.retrieve._get_qdrant", lambda: FakeQdrant())
+    _search("question", "_fake_domain")
+    assert "fake_collection" in str(captured["filter"])
+
+
 def test_ingest_node_respects_doc_type_override(tmp_path):
     """A filename present in doc_type_overrides skips keyword classification entirely."""
 

@@ -19,16 +19,6 @@ logger = logging.getLogger(__name__)
 _qdrant = None
 _reranker = None
 _llm_client = None
-_POLICY_DOMAINS = {
-    "cms1500": "health",
-    "eob": "health",
-    "medicare_summary_notice": "health",
-    "xactimate": "property",
-    "declarations_page": "property",
-    "loan": "loan",
-    "sba_form_413": "loan",
-    "sba_form_2202": "loan",
-}
 
 
 def _get_qdrant():
@@ -76,59 +66,38 @@ def _get_llm_client():
 
 
 def _failure_to_question(failure: dict, domain_key: str | None) -> str:
+    from claimflow.domains.base import get as get_domain
+
     rule = failure["rule"]
     reason = failure["reason"]
-    if domain_key == "cms1500":
-        if str(failure.get("field", "")).endswith("npi"):
-            return (
-                "What do CMS rules require for the billing provider National "
-                "Provider Identifier (NPI) in CMS-1500 Item 33a, including the "
-                f"10-digit numeric format? {reason}"
-            )
-        if rule == "icd10_lookup":
-            return (
-                "What CMS-1500 policy applies when Item 21 contains an unrecognized "
-                f"ICD-10-CM diagnosis code? {reason}"
-            )
-        if rule == "cpt_lookup":
-            return (
-                "What CMS-1500 policy applies when Item 24D contains an unrecognized "
-                f"CPT/HCPCS procedure code? {reason}"
-            )
-        if rule == "arithmetic":
-            return f"What is the policy on charge discrepancies? {reason}"
-    if domain_key == "xactimate":
-        if rule == "arithmetic":
-            return f"What is the policy on line-item total discrepancies in property estimates? {reason}"
-        if rule == "acv_check":
-            return f"What is the policy when actual cash value does not equal RCV minus depreciation? {reason}"
-        if rule == "negative_amount":
-            return f"What is the policy when a claim amount is negative? {reason}"
-    if domain_key == "loan":
-        if rule == "income_consistency":
-            return f"What is the policy when net income exceeds gross revenue on a loan application? {reason}"
-        if rule == "positive_amount":
-            return f"What is the minimum loan amount required? {reason}"
-        if rule == "signature_required":
-            return (
-                f"What happens when a loan application is missing a signature? {reason}"
-            )
+    if domain_key == "cms1500" and str(failure.get("field", "")).endswith("npi"):
+        return (
+            "What do CMS rules require for the billing provider National "
+            "Provider Identifier (NPI) in CMS-1500 Item 33a, including the "
+            f"10-digit numeric format? {reason}"
+        )
+    pack = get_domain(domain_key) if domain_key else None
+    template = pack.question_templates.get(rule) if pack else None
+    if template:
+        return template.format(reason=reason)
     return f"What does policy say about: {reason}"
 
 
 def _search(question: str, domain_key: str | None) -> list[dict]:
     from qdrant_client import models
 
+    from claimflow.domains.base import get as get_domain
+
     qdrant = _get_qdrant()
-    policy_domain = _POLICY_DOMAINS.get(domain_key or "")
+    pack = get_domain(domain_key) if domain_key else None
     conditions = []
-    if policy_domain:
+    if pack and pack.policy_collection:
         conditions.append(
             models.FieldCondition(
-                key="domain", match=models.MatchValue(value=policy_domain)
+                key="domain", match=models.MatchValue(value=pack.policy_collection)
             )
         )
-    if domain_key == "cms1500":
+    if pack and pack.retrieval_mode == "official_deterministic":
         conditions.append(
             models.FieldCondition(
                 key="authority", match=models.MatchValue(value="official_cms")
@@ -223,12 +192,17 @@ def _synthesize(
     domain_key: str | None = None,
     failure: dict | None = None,
 ) -> PolicyAnswer:
+    from claimflow.domains.base import get as get_domain
+
     if not chunks:
         return PolicyAnswer(
             question=question, answer="No relevant policy document found.", citations=[]
         )
 
-    if domain_key == "cms1500":
+    pack = get_domain(domain_key) if domain_key else None
+    official = pack is not None and pack.retrieval_mode == "official_deterministic"
+
+    if official:
         if failure and str(failure.get("field", "")).endswith("npi"):
             npi_chunks = [
                 chunk for chunk in chunks if chunk["source"] == "cms_npi_fact_sheet.pdf"
@@ -254,7 +228,7 @@ def _synthesize(
             excerpt = f"{excerpt[:237]}..."
         citations.append(f"[{index}] {chunk['source']} — {excerpt}")
 
-    if domain_key == "cms1500" and failure is not None:
+    if official and failure is not None:
         answer = _cms_policy_answer(failure, len(citations))
     else:
         logger.info("Synthesising policy answer (prompt_version=%s)", PROMPT_VERSION)
