@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import Any, Callable, Literal
 
 from doc_intel.schemas.base import SchemaSpec
 
@@ -13,6 +13,17 @@ class Domain:
     spec: SchemaSpec
     validate: Callable[[dict], list[ValidationFailure]]
     supporting_types: dict[str, set[str]] = field(default_factory=dict)
+
+    # DomainPack fields — all additive, all default to today's implicit behavior.
+    display_name: str = ""
+    policy_collection: str | None = None
+    retrieval_mode: Literal["official_deterministic", "llm_synthesis"] = "llm_synthesis"
+    question_templates: dict[str, str] = field(default_factory=dict)
+    extraction_hook: Callable[[Any, str], None] | None = None
+    extract_fn: Callable[[str, Any], Any] | None = None
+    confidence_threshold: float | None = None
+    escalation_threshold: float | None = None
+    reviewer_guidance: str = ""
 
 
 _REGISTRY: dict[str, Domain] = {}
