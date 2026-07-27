@@ -161,3 +161,68 @@ def test_full_package_lifecycle():
         assert db.get_package(session, package_id) is None
     finally:
         session.close()
+
+
+def test_rerun_validation_reports_decision_changed_with_new_labels():
+    fake_result = {
+        "package_dir": "/tmp/test",
+        "domain": "cms1500",
+        "documents": [
+            {
+                "path": "/tmp/test/claim.pdf",
+                "doc_type": "cms1500",
+                "has_text_layer": True,
+                "scan_quality": None,
+            }
+        ],
+        "extraction_data": {"billing_provider_npi": "1234567890"},
+        "extraction_fields": [
+            {
+                "name": "billing_provider_npi",
+                "value": "1234567890",
+                "confidence": 0.6,
+                "grounded": True,
+                "valid": False,
+                "field_status": "review",
+                "evidence": None,
+            },
+        ],
+        "extraction_status": "review",
+        "extraction_overall_confidence": 0.6,
+        "validation_failures": [
+            {"field": "billing_provider_npi", "rule": "npi_checksum", "reason": "invalid checksum"}
+        ],
+        "policy_answers": [],
+        "decision": "needs_review",
+        "review_reasons": ["invalid NPI"],
+        "error": None,
+    }
+    mock_graph = MagicMock()
+    mock_graph.invoke.return_value = fake_result
+
+    with patch("api.main.build_graph", return_value=mock_graph):
+        with TestClient(app) as client:
+            upload = client.post(
+                "/packages",
+                files=[
+                    ("files", ("claim.pdf", io.BytesIO(_PDF_BYTES), "application/pdf"))
+                ],
+            )
+            assert upload.status_code == 200
+            package_id = upload.json()["package_id"]
+
+            status = client.get(f"/packages/{package_id}")
+            assert status.json()["status"] == "review_ready"
+
+            rerun = client.post(
+                f"/packages/{package_id}/validation/re-run",
+                json={"corrected_fields": {"billing_provider_npi": "1234567893"}},
+            )
+            assert rerun.status_code == 200
+            body = rerun.json()
+            assert body["decision"] in (
+                "ready_for_processing",
+                "needs_review",
+                "blocked_or_incomplete",
+            )
+            assert isinstance(body["decision_changed"], bool)
