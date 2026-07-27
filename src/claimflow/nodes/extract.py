@@ -45,8 +45,6 @@ if settings.openai_api_key.get_secret_value():
 if settings.anthropic_api_key.get_secret_value():
     _doc_intel_config.ANTHROPIC_API_KEY = settings.anthropic_api_key.get_secret_value()
 
-import claimflow.domains  # noqa: F401, E402
-from claimflow.domains.base import get as get_domain  # noqa: E402
 from claimflow.state import ClaimState  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -1041,6 +1039,23 @@ def _correct_sba_form_413_widgets(result, source: Path) -> None:
         ]
 
 
+def _cms1500_extract_fn(source: str, spec: SchemaSpec) -> ExtractionResult:
+    path = Path(source)
+    if path.suffix.lower() in _CMS1500_IMAGE_SUFFIXES:
+        regional_text = _cms1500_region_text(path)
+        if regional_text:
+            return _extract_cms1500_text(regional_text, spec)
+    return extract(source, spec, classify_doc=True)
+
+
+# Imported here (rather than at module top) so that claimflow.domains — which wires
+# this module's extract_fn/extraction_hook callables onto domain registrations as a
+# side effect of import — sees a fully-defined module instead of a partially
+# initialized one when the two modules import each other.
+import claimflow.domains  # noqa: F401, E402
+from claimflow.domains.base import get as get_domain  # noqa: E402
+
+
 def extract_node(state: ClaimState) -> dict:
     domain_key = state.get("domain")
     if not domain_key:
@@ -1065,24 +1080,19 @@ def extract_node(state: ClaimState) -> dict:
 
     try:
         source: str = claim_doc["path"]
-        classify_doc = True
         path = Path(source)
-        if domain_key == "cms1500" and path.suffix.lower() in _CMS1500_IMAGE_SUFFIXES:
-            regional_text = _cms1500_region_text(path)
-            if regional_text:
-                source = regional_text
-                classify_doc = False
-        if domain_key == "cms1500" and not classify_doc:
-            result = _extract_cms1500_text(source, domain.spec)
-        elif domain_key == "xactimate":
-            result = _extract_xactimate_pages(source, domain.spec)
+        if domain.extract_fn is not None:
+            result = domain.extract_fn(source, domain.spec)
         else:
-            result = extract(source, domain.spec, classify_doc=classify_doc)
+            result = extract(source, domain.spec, classify_doc=True)
         _null_placeholder_fields(result)
-        if domain_key == "eob" and result.status != "error":
-            _correct_eob_payer(result, load_source(source).full_text)
-        if domain_key == "sba_form_413" and result.status != "error":
-            _correct_sba_form_413_widgets(result, path)
+        if domain.extraction_hook is not None and result.status != "error":
+            if domain.doc_type == "eob":
+                # EOB's hook cross-checks the payer against the document body, so it
+                # needs the loaded full text rather than the file path.
+                domain.extraction_hook(result, load_source(source).full_text)
+            else:
+                domain.extraction_hook(result, path)
     except Exception as exc:
         return {"error": str(exc), "extraction_status": "error"}
 

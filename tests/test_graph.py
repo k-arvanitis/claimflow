@@ -185,6 +185,25 @@ def test_extract_node_uses_regional_ocr_for_cms1500_image(tmp_path):
     assert result["extraction_overall_confidence"] == 0.95
 
 
+def test_extract_node_has_no_hardcoded_domain_branches():
+    import inspect
+
+    from claimflow.nodes.extract import extract_node
+
+    source = inspect.getsource(extract_node)
+    assert "domain_key ==" not in source
+
+
+def test_domain_packs_wire_extract_hooks():
+    from claimflow.domains.base import get
+    from claimflow.nodes import extract as ex
+
+    assert get("cms1500").extract_fn is ex._cms1500_extract_fn
+    assert get("xactimate").extract_fn is ex._extract_xactimate_pages
+    assert get("eob").extraction_hook is ex._correct_eob_payer
+    assert get("sba_form_413").extraction_hook is ex._correct_sba_form_413_widgets
+
+
 def test_cms1500_region_corrections_keep_box_24_columns_aligned():
     from unittest.mock import MagicMock
 
