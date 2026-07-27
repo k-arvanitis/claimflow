@@ -243,13 +243,14 @@ def _synthesize(
 
 def retrieve_node(state: ClaimState) -> dict:
     failures = state.get("validation_failures") or []
-    if not failures:
+    policy_failures = [f for f in failures if f.get("policy_required")]
+    if not policy_failures:
         return {"policy_answers": []}
 
     domain_key = state.get("domain")
     answers: list[PolicyAnswer] = []
     seen: set[str] = set()
-    for failure in failures:
+    for failure in policy_failures:
         question = _failure_to_question(failure, domain_key)
         if question in seen:
             continue

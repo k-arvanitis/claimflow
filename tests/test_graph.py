@@ -696,6 +696,31 @@ def test_retrieve_node_skipped_when_no_failures():
     assert result["policy_answers"] == []
 
 
+def test_retrieve_node_skips_policy_lookup_for_non_policy_failures(monkeypatch):
+    from claimflow.nodes.retrieve import retrieve_node
+
+    called = {"search": False}
+    monkeypatch.setattr(
+        "claimflow.nodes.retrieve._search",
+        lambda *a, **k: called.update(search=True) or [],
+    )
+    state = {
+        "domain": "loan",
+        "validation_failures": [
+            {
+                "field": "loan_amount",
+                "rule": "arithmetic",
+                "reason": "totals do not match",
+                "severity": "warning",
+                "policy_required": False,
+            }
+        ],
+    }
+    result = retrieve_node(state)
+    assert result == {"policy_answers": []}
+    assert called["search"] is False
+
+
 def test_cms_policy_question_targets_billing_provider_npi():
     from claimflow.nodes.retrieve import _failure_to_question
 
