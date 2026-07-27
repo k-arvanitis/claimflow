@@ -13,18 +13,19 @@ from fastapi.responses import JSONResponse, Response
 
 from claimflow import db, review
 from claimflow.config import settings
-from claimflow.domains.base import all_domains, get as get_domain
+from claimflow.domains.base import all_domains
+from claimflow.domains.base import get as get_domain
 from claimflow.graph import build_graph
 from claimflow.nodes.ingest import INGESTIBLE_SUFFIXES
 from claimflow.nodes.review import review_node
 from claimflow.pages import render_page
 from claimflow.schemas.dashboard import DashboardSummaryResponse
-from claimflow.schemas.domain_packs import DomainPackDetail, DomainPackSummary
 from claimflow.schemas.documents import (
     DocumentReclassifyRequest,
     DocumentReclassifyResponse,
     DocumentSummary,
 )
+from claimflow.schemas.domain_packs import DomainPackDetail, DomainPackSummary
 from claimflow.schemas.enums import PackageStatus
 from claimflow.schemas.errors import AppError, ErrorBody, ErrorEnvelope
 from claimflow.schemas.packages import (
@@ -851,7 +852,13 @@ async def get_package_review(package_id: str):
                 for f in fields
             ],
             validation_failures=[
-                ReviewValidationFailure(field=vf.field, rule=vf.rule, reason=vf.reason)
+                ReviewValidationFailure(
+                    field=vf.field,
+                    rule=vf.rule,
+                    reason=vf.reason,
+                    severity=vf.severity,
+                    policy_required=vf.policy_required,
+                )
                 for vf in failures
             ],
         )

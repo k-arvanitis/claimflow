@@ -21,8 +21,8 @@ test:
 	uv run pytest tests/ -v
 
 lint:
-	uv run ruff check src tests
-	uv run ruff format --check src tests
+	uv run ruff check src tests api
+	uv run ruff format --check src tests api
 
 api:
 	uv run uvicorn api.main:app --reload --port 8010

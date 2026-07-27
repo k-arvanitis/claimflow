@@ -359,7 +359,7 @@ def _validate(data: dict) -> list[ValidationFailure]:
                 rule="arithmetic",
                 reason="Could not parse charge amounts as decimal numbers",
                 severity="warning",
-                policy_required=True,
+                policy_required=False,
             )
         )
 

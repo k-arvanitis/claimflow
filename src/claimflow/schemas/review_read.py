@@ -37,6 +37,8 @@ class ReviewValidationFailure(BaseModel):
     field: str
     rule: str
     reason: str
+    severity: str
+    policy_required: bool
 
 
 class PackageReviewResponse(BaseModel):

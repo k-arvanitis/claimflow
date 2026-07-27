@@ -192,6 +192,9 @@ def test_extract_node_has_no_hardcoded_domain_branches():
 
     source = inspect.getsource(extract_node)
     assert "domain_key ==" not in source
+    # Exactly one sanctioned exception: EOB's hook needs loaded full text, not a path,
+    # so it's keyed on domain.doc_type rather than expressible via extraction_hook alone.
+    assert source.count("domain.doc_type ==") == 1
 
 
 def test_domain_packs_wire_extract_hooks():

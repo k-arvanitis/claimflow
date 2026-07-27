@@ -178,7 +178,7 @@ def _validate(data: dict) -> list[ValidationFailure]:
                 rule="arithmetic",
                 reason="Could not parse amount as decimal",
                 severity="warning",
-                policy_required=True,
+                policy_required=False,
             )
         )
 
