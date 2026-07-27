@@ -154,7 +154,7 @@ Deterministic, not LLM self-verification — the same numbers, codes, and dates 
 
 ## CMS-1500 demo flow: one package end to end
 
-The CMS-1500 pack is ClaimFlow's reference implementation — the domain with the deepest validation and the only one with deterministic, officially-sourced policy answers. A real run against `data/synthetic/health/package_004` (one input file, `claim.pdf` — a born-digital CMS-1500 form with a genuinely invalid injected diagnosis code) through the seven-stage workflow:
+The CMS-1500 pack is ClaimFlow's reference implementation — the domain with the deepest validation and the only one with deterministic, officially-sourced policy answers. A real run against `data/synthetic/health/package_004` (one input file, `claim.pdf` — a born-digital CMS-1500 form with a genuinely invalid injected diagnosis code) through the seven-stage workflow. This particular package happens to be a single document because that's the file carrying the injected error being demonstrated; a real package commonly includes supporting documents alongside the primary claim form (an EOB, an itemized bill), each classified independently — see [Document classification](#document-classification).
 
 **1. Classified documents**
 
@@ -181,7 +181,19 @@ The CMS-1500 pack is ClaimFlow's reference implementation — the domain with th
 [{ "field": "diagnosis_codes", "rule": "icd10_lookup", "reason": "'XXXXX' is not a recognized ICD-10-CM code" }]
 ```
 
-**4. Final decision**
+The `icd10_lookup` rule has a `question_templates` entry (`src/claimflow/domains/health.py`), so this failure is `policy_required=True` — it does trigger the next stage.
+
+**4. Policy retrieval** (`retrieval_mode="official_deterministic"` for CMS-1500 — see [Validation rules](#validation-rules); templated, not LLM-synthesized, `src/claimflow/nodes/retrieve.py`'s `_cms_policy_answer`)
+
+```json
+{
+  "question": "What CMS-1500 policy applies when Item 21 contains an unrecognized ICD-10-CM diagnosis code? 'XXXXX' is not a recognized ICD-10-CM code",
+  "answer": "CMS Chapter 26 requires the diagnosis reported in Item 21 to use the applicable diagnosis code set at the highest specificity for the date of service [1]. ClaimFlow's code registry reported: 'XXXXX' is not a recognized ICD-10-CM code. The manual supports the coding requirement; the registry, not the manual, determines whether this particular code exists.",
+  "citations": ["[1] cms_medicare_claims_processing_manual_ch26.pdf — ..."]
+}
+```
+
+**5. Final decision**
 
 ```
 decision: needs_review
@@ -189,15 +201,32 @@ review_reasons:
   - "diagnosis_codes: 'XXXXX' is not a recognized ICD-10-CM code"
 ```
 
-**5. Reviewer export** (after approving the scalar fields in the Streamlit review queue)
+The remaining steps continue the same real package, showing what the pipeline's review/audit/revalidation machinery (documented in full above and in [Review](#review)) does with this specific failure — not a second captured run.
+
+**6. Reviewer correction** — a reviewer submits `POST /packages/{package_id}/fields/{field_id}/review` with `action=edit` and a corrected `diagnosis_codes` value (a real ICD-10-CM code in place of the injected `'XXXXX'`), the same call path as the `GET /packages/{package_id}/review` example above (see [Review](#review)); other, unaffected fields (`patient_name`, `total_charge`) are `approve`d unchanged.
+
+**7. Audit trail** — the correction is recorded via `GET /packages/{package_id}/audit` (see [Policy support, audit, and dashboard](#policy-support-audit-and-dashboard)), one `AuditEventItem` per event (`actor`, `action`, `timestamp`, `detail` — `src/claimflow/schemas/reporting.py`):
+
+```json
+{"actor": "reviewer", "action": "review_edit", "timestamp": "2026-07-27T10:15:00Z", "detail": {"field": "diagnosis_codes"}}
+```
+
+**8. Revalidation and rerouting** — `POST /packages/{package_id}/validation/re-run` re-runs the same deterministic validator against the corrected value (see [Persistence and workflow state](#persistence-and-workflow-state)); with a valid ICD-10 code the `icd10_lookup` failure no longer fires, so the response reports the decision moving off `needs_review`:
+
+```json
+{"decision": "ready_for_processing", "decision_changed": true, "previous_decision": "needs_review"}
+```
+
+**9. Reviewer export**
 
 ```json
 {
-  "decision": "needs_review",
+  "decision": "ready_for_processing",
   "domain": "cms1500",
   "fields": {
     "patient_name": { "original_value": "TAYLOR MICHAEL", "action": "approve", "final_value": "TAYLOR MICHAEL", "confidence": 1.0 },
-    "total_charge": { "original_value": 121.0, "action": "approve", "final_value": 121.0, "confidence": 1.0 }
+    "total_charge": { "original_value": 121.0, "action": "approve", "final_value": 121.0, "confidence": 1.0 },
+    "diagnosis_codes": { "original_value": ["XXXXX"], "action": "edit", "final_value": ["<corrected code>"], "confidence": 1.0 }
   }
 }
 ```
