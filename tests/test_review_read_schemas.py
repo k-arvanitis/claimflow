@@ -51,6 +51,64 @@ def test_get_package_review_returns_fields_and_failures():
     assert failure["reason"] == "bad code"
 
 
+def test_get_package_review_exposes_latest_reviewer_action():
+    session = db.SessionLocal()
+    try:
+        pkg = db.create_package(session, str(uuid.uuid4()))
+        doc = db.create_document(session, pkg.id, {
+            "path": "/tmp/claim.pdf", "doc_type": "cms1500",
+            "has_text_layer": True, "scan_quality": None,
+        })
+        run = db.create_extraction_run(session, doc.id, "cms1500", "review", 0.5)
+        db.create_extracted_fields(session, run.id, [
+            {"name": "claim_number", "value": None, "confidence": 0.3,
+             "grounded": False, "valid": True, "field_status": "not_found", "evidence": None},
+        ])
+        db.record_review_action(
+            session, run.id, "claim_number", "edit",
+            original_value=None, corrected_value="CLM-9001", reviewer="jane", note="typed in from cover letter",
+        )
+        package_id = pkg.id
+    finally:
+        session.close()
+
+    with TestClient(app) as client:
+        resp = client.get(f"/packages/{package_id}/review")
+
+    field = resp.json()["fields"][0]
+    assert field["reviewer_action"] == "edit"
+    assert field["corrected_value"] == "CLM-9001"
+    assert field["reviewer"] == "jane"
+    assert field["reviewer_note"] == "typed in from cover letter"
+
+
+def test_get_package_review_field_without_review_action_has_null_reviewer_fields():
+    session = db.SessionLocal()
+    try:
+        pkg = db.create_package(session, str(uuid.uuid4()))
+        doc = db.create_document(session, pkg.id, {
+            "path": "/tmp/claim.pdf", "doc_type": "cms1500",
+            "has_text_layer": True, "scan_quality": None,
+        })
+        run = db.create_extraction_run(session, doc.id, "cms1500", "review", 0.5)
+        db.create_extracted_fields(session, run.id, [
+            {"name": "patient_name", "value": "DOE JOHN", "confidence": 0.91,
+             "grounded": True, "valid": True, "field_status": "found", "evidence": None},
+        ])
+        package_id = pkg.id
+    finally:
+        session.close()
+
+    with TestClient(app) as client:
+        resp = client.get(f"/packages/{package_id}/review")
+
+    field = resp.json()["fields"][0]
+    assert field["reviewer_action"] is None
+    assert field["corrected_value"] is None
+    assert field["reviewer"] is None
+    assert field["reviewer_note"] is None
+
+
 def test_evidence_404_uses_error_envelope():
     with TestClient(app) as client:
         resp = client.get("/packages/pkg/fields/999999/evidence")

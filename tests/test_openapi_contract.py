@@ -5,6 +5,7 @@ from api.main import app
 EXPECTED_ROUTES = {
     ("GET", "/health"),
     ("GET", "/dashboard/summary"),
+    ("GET", "/settings"),
     ("POST", "/packages"),
     ("GET", "/packages"),
     ("GET", "/packages/{package_id}"),

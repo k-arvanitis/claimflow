@@ -2,6 +2,7 @@
 package_id throughout — the per-endpoint tests elsewhere in this suite already
 cover isolated behavior (retry, duplicate /process, invalid ids, path
 traversal, etc); this file proves the pieces actually chain together."""
+
 import io
 from unittest.mock import MagicMock, patch
 
@@ -17,15 +18,31 @@ def test_full_package_lifecycle():
     fake_result = {
         "package_dir": "/tmp/test",
         "domain": "cms1500",
-        "documents": [{"path": "/tmp/test/claim.pdf", "doc_type": "cms1500", "has_text_layer": True, "scan_quality": None}],
+        "documents": [
+            {
+                "path": "/tmp/test/claim.pdf",
+                "doc_type": "cms1500",
+                "has_text_layer": True,
+                "scan_quality": None,
+            }
+        ],
         "extraction_data": {"patient_name": "DOE JOHN"},
         "extraction_fields": [
-            {"name": "patient_name", "value": "DOE JOHN", "confidence": 0.6,
-             "grounded": True, "valid": True, "field_status": "review", "evidence": None},
+            {
+                "name": "patient_name",
+                "value": "DOE JOHN",
+                "confidence": 0.6,
+                "grounded": True,
+                "valid": True,
+                "field_status": "review",
+                "evidence": None,
+            },
         ],
         "extraction_status": "review",
         "extraction_overall_confidence": 0.6,
-        "validation_failures": [{"field": "patient_dob", "rule": "mandatory", "reason": "missing"}],
+        "validation_failures": [
+            {"field": "patient_dob", "rule": "mandatory", "reason": "missing"}
+        ],
         "policy_answers": [],
         "decision": "flagged",
         "review_reasons": ["low confidence"],
@@ -38,7 +55,10 @@ def test_full_package_lifecycle():
         with TestClient(app) as client:
             # upload -> processing kicks off automatically
             upload = client.post(
-                "/packages", files=[("files", ("claim.pdf", io.BytesIO(_PDF_BYTES), "application/pdf"))]
+                "/packages",
+                files=[
+                    ("files", ("claim.pdf", io.BytesIO(_PDF_BYTES), "application/pdf"))
+                ],
             )
             assert upload.status_code == 200
             package_id = upload.json()["package_id"]
@@ -67,12 +87,18 @@ def test_full_package_lifecycle():
 
             # package shows up in the reviews queue
             queue = client.get("/reviews/queue")
-            assert any(item["package_id"] == package_id for item in queue.json()["items"])
+            assert any(
+                item["package_id"] == package_id for item in queue.json()["items"]
+            )
 
             # reviewer corrects the field
             field_review = client.post(
                 f"/packages/{package_id}/fields/{field_id}/review",
-                json={"action": "edit", "corrected_value": "DOE JON", "reviewer": "alice"},
+                json={
+                    "action": "edit",
+                    "corrected_value": "DOE JON",
+                    "reviewer": "alice",
+                },
             )
             assert field_review.status_code == 200
 
@@ -84,20 +110,46 @@ def test_full_package_lifecycle():
             assert rerun.status_code == 200
             assert "decision" in rerun.json()
 
+            after_rerun = client.get(f"/packages/{package_id}").json()
+            assert after_rerun["decision"] == rerun.json()["decision"]
+            assert (
+                after_rerun["result"]["validation_failures"]
+                == rerun.json()["validation_failures"]
+            )
+
             # reviewer records the final decision
-            decision = client.post(f"/packages/{package_id}/decision", json={"decision": "approved"})
+            decision = client.post(
+                f"/packages/{package_id}/decision", json={"decision": "approved"}
+            )
             assert decision.status_code == 200
             assert decision.json()["decision"] == "approved"
+            assert client.get(f"/packages/{package_id}").json()["status"] == "completed"
 
             # audit trail recorded the whole journey
             audit = client.get(f"/packages/{package_id}/audit")
             assert audit.status_code == 200
             actions = {entry["action"] for entry in audit.json()}
-            assert {"upload", "status_transition", "review_edit", "validation_rerun", "decision"} <= actions
+            assert {
+                "upload",
+                "status_transition",
+                "review_edit",
+                "validation_rerun",
+                "decision",
+            } <= actions
 
             # export reflects the finalized package
             export = client.get(f"/packages/{package_id}/export")
             assert export.status_code == 200
+            export_body = export.json()
+            assert export_body["decision"] == "approved"
+            patient_name = next(
+                field
+                for field in export_body["extraction_fields"]
+                if field["name"] == "patient_name"
+            )
+            assert patient_name["value"] == "DOE JOHN"
+            assert patient_name["final_value"] == "DOE JON"
+            assert patient_name["reviewer_action"] == "edit"
 
             # delete removes it
             delete = client.delete(f"/packages/{package_id}")

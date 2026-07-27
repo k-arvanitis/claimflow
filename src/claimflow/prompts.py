@@ -3,17 +3,37 @@ PROMPT_VERSION = "2026-07-02"
 HEALTH_EXTRACTION = (
     "Extract all fields from this CMS-1500 health insurance claim form. "
     "The form has numbered boxes — use the box numbers in field descriptions as anchors. "
+    "The OCR input may contain several overlapping labeled regions of the same form; merge them "
+    "as one document and do not duplicate values or service lines. "
     "For diagnosis codes extract only the code itself (e.g. J06.9), not descriptions. "
     "For dates use MMDDYYYY format as printed on the form. "
     "For boolean fields: 'X' or checked box = True, empty = False. "
     "Extract ID numbers (insurance ID, insured ID, tax ID, NPI) verbatim as printed, including "
     "any letter prefix — the value directly below the box 1a label 'INSURED'S I.D. NUMBER' is the "
     "full ID; a leading letter sequence there is part of the ID, not a separate label, so don't "
-    "strip it. If that box is blank, return null — never invent an ID or reuse an example value."
+    "strip it. If that box is blank or the OCR has no value explicitly associated with Box 1a, "
+    "return null — never invent an ID, copy the Box 11 policy/group number, or reuse an example "
+    "value. In the Box 24 table, the columns are A service dates, B place of service, C EMG, D "
+    "CPT/HCPCS followed by modifier cells, E diagnosis pointer, F charges, G units, H EPSDT, I ID "
+    "qualifier, and J rendering provider ID. Preserve all four modifier cells separately and do "
+    "not mistake EMG values such as '1C' for the diagnosis pointer, which comes after all modifier "
+    "cells. The modifier field is the first modifier cell. Phone fields must include area code. "
+    "For referring_provider_name, extract only the Box 17 name. The two-character value printed "
+    "immediately to its left is referring_provider_qualifier; it is not part of the name and the "
+    "printed '17a' box label is never a qualifier value. In Boxes 14, 17a, and 21, extract the "
+    "value beside the printed QUAL/17a/ICD-indicator label, never the label or description itself. "
+    "A nonblank mark or text on either signature line means its signature-on-file field is true. "
+    "Capture the Box 31 signer text and date separately. federal_tax_id_type is whichever SSN/EIN "
+    "checkbox is marked. "
+    "billing_provider_npi is specifically Box 33a (the value after the 'a.' marker), never Box "
+    "33b. billing_provider_address includes every printed address line in Box 33: street plus "
+    "city, state, and ZIP; service_facility_address likewise includes every Box 32 address line."
 )
 
 PROPERTY_EXTRACTION = (
     "Extract all fields from this Xactimate property damage estimate. "
+    "property_address is only the explicitly labeled damaged-property/risk/loss location; never "
+    "use an estimator, adjuster, contractor, or insurer letterhead address. "
     "Line items each have a category, description, quantity, unit, unit cost, and total. "
     "RCV = total replacement cost value. actual_cash_value = RCV minus depreciation ONLY — "
     "some documents also print a separate deductible-adjusted figure (e.g. 'Net Actual Cash "
@@ -26,7 +46,9 @@ PROPERTY_EXTRACTION = (
     "adjuster_name is specifically an insurance company's claims adjuster — a contractor's own "
     "estimator or preparer is a different role; if only an estimator/preparer is named and no "
     "distinct adjuster appears, return null rather than using the estimator's name. "
-    "For dates use MMDDYYYY format."
+    "date_of_loss must come from an explicit Date of Loss/Loss Date field; never substitute Date "
+    "Entered, Date Assigned, estimate-completed, or job-completed dates. For dates use MMDDYYYY "
+    "format."
 )
 
 LOAN_EXTRACTION = (
@@ -45,6 +67,8 @@ LOAN_EXTRACTION = (
 
 EOB_EXTRACTION = (
     "Extract all fields from this Explanation of Benefits (EOB) or Medicare Summary Notice (MSN). "
+    "payer_name is only a payer explicitly populated as the claim's payer; do not infer it from "
+    "Medicare/CMS branding, a document title, or explanatory example text. "
     "provider_charges is the amount the provider billed; allowed_charges is the payer's approved "
     "amount for the service (usually lower than provider_charges). plan_paid is what the insurer/"
     "Medicare paid; patient_responsibility is what the patient owes. "
@@ -85,6 +109,9 @@ SBA_FORM_413_EXTRACTION = (
 
 RETRIEVAL_SYNTHESIS = (
     "Answer the following question using only the policy excerpts below. "
-    "Cite sources as [1], [2], [3].\n\n"
+    "Cite sources as [1], [2], [3]. Do not add code descriptions, suggested "
+    "corrections, medical facts, or coverage conclusions that are not explicitly "
+    "stated in the excerpts. If the excerpts do not address the question, say so "
+    "directly rather than inferring an answer.\n\n"
     "Question: {question}\n\nPolicy excerpts:\n{context}"
 )

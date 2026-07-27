@@ -44,10 +44,22 @@ def _classify_doc_type(text: str) -> tuple[str, str | None]:
     supporting doc can't steal the match away from the form itself. Returns
     (doc_type, reason) — reason is None only for "unknown"."""
     lower = text.lower()
-    for domain in all_domains():
-        for kw in domain.keywords:
-            if kw in lower:
-                return domain.doc_type, f"matched domain keyword '{kw}' for {domain.doc_type}"
+    domain_matches = [
+        (domain.doc_type, keyword)
+        for domain in all_domains()
+        for keyword in domain.keywords
+        if keyword in lower
+    ]
+    if domain_matches:
+        doc_type, keyword = max(
+            domain_matches,
+            key=lambda match: (
+                bool(any(char.isdigit() for char in match[1])),
+                len(match[1].split()),
+                len(match[1]),
+            ),
+        )
+        return doc_type, f"matched domain keyword '{keyword}' for {doc_type}"
     for domain in all_domains():
         for subtype, keywords in domain.supporting_types.items():
             for kw in keywords:

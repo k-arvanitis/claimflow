@@ -17,18 +17,46 @@ def session(tmp_path):
     return sessionmaker(bind=engine)()
 
 
-def _seed(session, package_id, status, domain=None, decision=None, confidence=None, rule=None, days_ago=0):
-    session.add(db.Package(
-        id=package_id, status=status,
-        created_at=datetime.now(timezone.utc) - timedelta(days=days_ago),
-    ))
+def _seed(
+    session,
+    package_id,
+    status,
+    domain=None,
+    decision=None,
+    confidence=None,
+    rule=None,
+    days_ago=0,
+):
+    session.add(
+        db.Package(
+            id=package_id,
+            status=status,
+            created_at=datetime.now(timezone.utc) - timedelta(days=days_ago),
+        )
+    )
     session.commit()
     if domain or confidence is not None:
-        session.add(db.Document(id=f"{package_id}-doc", package_id=package_id, path=f"{package_id}.pdf", doc_type=domain or "cms1500", has_text_layer=True))
+        session.add(
+            db.Document(
+                id=f"{package_id}-doc",
+                package_id=package_id,
+                path=f"{package_id}.pdf",
+                doc_type=domain or "cms1500",
+                has_text_layer=True,
+            )
+        )
         session.commit()
-        run = db.create_extraction_run(session, f"{package_id}-doc", domain or "cms1500", "review", confidence or 0.8)
+        run = db.create_extraction_run(
+            session,
+            f"{package_id}-doc",
+            domain or "cms1500",
+            "review",
+            confidence or 0.8,
+        )
         if rule:
-            db.create_validation_failures(session, run.id, [{"field": "x", "rule": rule, "reason": "r"}])
+            db.create_validation_failures(
+                session, run.id, [{"field": "x", "rule": rule, "reason": "r"}]
+            )
     if decision:
         db.create_decision(session, package_id, decision, [])
 
@@ -80,8 +108,22 @@ def test_filter_by_confidence_range(session):
 
 
 def test_filter_by_validation_rule(session):
-    _seed(session, "pkg-a", "completed", domain="cms1500", confidence=0.9, rule="npi_format")
-    _seed(session, "pkg-b", "completed", domain="cms1500", confidence=0.9, rule="date_range")
+    _seed(
+        session,
+        "pkg-a",
+        "completed",
+        domain="cms1500",
+        confidence=0.9,
+        rule="npi_format",
+    )
+    _seed(
+        session,
+        "pkg-b",
+        "completed",
+        domain="cms1500",
+        confidence=0.9,
+        rule="date_range",
+    )
 
     rows, total = db.list_packages_filtered(session, validation_rule="npi_format")
     assert total == 1
@@ -92,7 +134,9 @@ def test_filter_by_date_range(session):
     _seed(session, "pkg-old", "completed", days_ago=10)
     _seed(session, "pkg-new", "completed", days_ago=0)
 
-    rows, total = db.list_packages_filtered(session, date_from=datetime.now(timezone.utc) - timedelta(days=1))
+    rows, total = db.list_packages_filtered(
+        session, date_from=datetime.now(timezone.utc) - timedelta(days=1)
+    )
     assert total == 1
     assert rows[0].id == "pkg-new"
 
@@ -104,6 +148,36 @@ def test_search_matches_package_id_substring(session):
     rows, total = db.list_packages_filtered(session, search="abc")
     assert total == 1
     assert rows[0].id == "abc123"
+
+
+def test_read_model_includes_domain_decision_confidence_and_counts(session):
+    _seed(
+        session,
+        "pkg-a",
+        "review_ready",
+        domain="cms1500",
+        confidence=0.6,
+        decision="flagged",
+        rule="npi_format",
+    )
+
+    rows, _ = db.list_packages_filtered(session, status="review_ready")
+    model = db.package_read_model(session, rows[0])
+
+    assert model["domain"] == "cms1500"
+    assert model["decision"] == "flagged"
+    assert model["overall_confidence"] == 0.6
+    assert model["document_count"] == 1
+    assert model["validation_failure_count"] == 1
+    assert model["updated_at"] is not None
+
+
+def test_sort_by_confidence_ascending(session):
+    _seed(session, "pkg-a", "completed", domain="cms1500", confidence=0.9)
+    _seed(session, "pkg-b", "completed", domain="cms1500", confidence=0.2)
+
+    rows, _ = db.list_packages_filtered(session, sort="confidence")
+    assert rows[0].id == "pkg-b"
 
 
 def test_sort_ascending(session):
@@ -125,7 +199,9 @@ def test_page_size_clamped_to_max(session):
 def test_list_packages_endpoint_paginates(monkeypatch):
     with TestClient(app) as client:
         for _ in range(3):
-            create = client.post("/packages", files={"files": ("a.pdf", b"%PDF-1.4", "application/pdf")})
+            client.post(
+                "/packages", files={"files": ("a.pdf", b"%PDF-1.4", "application/pdf")}
+            )
         resp = client.get("/packages?page=1&page_size=2")
 
     assert resp.status_code == 200
@@ -139,11 +215,15 @@ def test_list_packages_endpoint_paginates(monkeypatch):
 
 def test_reviews_queue_defaults_to_review_ready_status(monkeypatch):
     with TestClient(app) as client:
-        create = client.post("/packages", files={"files": ("a.pdf", b"%PDF-1.4", "application/pdf")})
+        create = client.post(
+            "/packages", files={"files": ("a.pdf", b"%PDF-1.4", "application/pdf")}
+        )
         package_id = create.json()["package_id"]
 
         session = db.SessionLocal()
-        db.transition_package_status(session, package_id, "review_ready", reason="test setup")
+        db.transition_package_status(
+            session, package_id, "review_ready", reason="test setup"
+        )
         session.close()
 
         resp = client.get("/reviews/queue")
@@ -154,9 +234,11 @@ def test_reviews_queue_defaults_to_review_ready_status(monkeypatch):
 
 def test_reviews_queue_explicit_status_overrides_default(monkeypatch):
     with patch("api.main._run_claim"), TestClient(app) as client:
-        create = client.post("/packages", files={"files": ("a.pdf", b"%PDF-1.4", "application/pdf")})
+        create = client.post(
+            "/packages", files={"files": ("a.pdf", b"%PDF-1.4", "application/pdf")}
+        )
         package_id = create.json()["package_id"]
-        resp = client.get("/reviews/queue?status=queued")
+        resp = client.get("/reviews/queue?status=processing")
 
     body = resp.json()
     assert any(item["package_id"] == package_id for item in body["items"])

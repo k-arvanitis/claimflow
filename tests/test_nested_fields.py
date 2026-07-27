@@ -2,10 +2,9 @@ import json
 import uuid
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-
-from fastapi.testclient import TestClient
 
 from api.main import app
 from claimflow import db

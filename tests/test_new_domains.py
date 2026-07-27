@@ -22,6 +22,12 @@ def test_declarations_page_classifies():
 
 def test_sba_form_413_classifies():
     assert _classify_doc_type("Personal Financial Statement — SBA Form 413")[0] == "sba_form_413"
+    assert (
+        _classify_doc_type(
+            "U.S. Small Business Administration Personal Financial Statement SBA Form 413"
+        )[0]
+        == "sba_form_413"
+    )
 
 
 def test_sba_form_2202_classifies():

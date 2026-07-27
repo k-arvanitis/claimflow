@@ -8,7 +8,7 @@ Unlike a plain "PDF to JSON" extractor, ClaimFlow is built for workflows where e
 
 Supports three claim domains out of the box: **CMS-1500 health**, **Xactimate property damage**, and **SBA loan applications**.
 
-**Supported inputs:** born-digital PDFs, scanned/image-only PDFs (OCR fallback via [doc-intel](../doc-intel), tesseract by default), standalone images (PNG/JPG/WEBP/TIFF/BMP), DOCX (converted to PDF via LibreOffice so it goes through the same page-based pipeline as everything else), and multi-document packages mixing any of these.
+**Supported inputs:** born-digital PDFs, scanned/image-only PDFs processed through [doc-intel](../doc-intel)'s configured OCR backend (PaddleOCR-VL by default, with LightOn and Tesseract as configurable fallback providers), standalone images (PNG/JPG/WEBP/TIFF/BMP), DOCX (converted to PDF via LibreOffice so it goes through the same page-based pipeline as everything else), and multi-document packages mixing any of these.
 
 ![Architecture](assets/architecture.svg)
 
@@ -31,7 +31,7 @@ It is not a production HIPAA/compliance system as-is.
 | Ingest | Deterministic | Reads PDFs, images, and DOCX from the package directory; text-layer detection and OCR fallback via [doc-intel](../doc-intel)'s `build_artifact()`; classifies every document by type |
 | Extract | LLM | Structured field extraction via [doc-intel](../doc-intel); confidence + source evidence per field |
 | Validate | Deterministic | Domain-specific rule checks (arithmetic, lookup tables, date windows) |
-| Retrieve | Hybrid / LLM-assisted | Qdrant vector search + cross-encoder rerank (deterministic) + LLM synthesis (generative) for each failing rule |
+| Retrieve | Hybrid / source-grounded | Domain-filtered Qdrant search; deterministic official-source answers for CMS-1500; cross-encoder rerank + LLM synthesis for other domains |
 | Review | Deterministic | Confidence + failure thresholds → routing decision; human review is triggered by validation failures, low-confidence or conflicting extractions, and configured high-risk conditions |
 
 The Retrieve node is skipped when Validate finds no failures.
@@ -82,15 +82,31 @@ Every extracted field carries where it came from, not just its value:
 Scanned pages don't get a black-box "trust the model" treatment:
 
 - **Side-by-side page viewer** — the review UI renders the original page image next to its extracted text (native text layer, or on-demand OCR for scanned pages), with page navigation and a "jump to this field's evidence" shortcut.
-- **Low-quality scan detection** — a density heuristic (extracted characters vs. a normal text page) flags likely-failed scans. It is not a real per-word OCR confidence score — doc-intel's OCR backends don't expose one — so it's surfaced as a detection signal, not a confidence metric.
+- **Low-quality scan detection** — a density heuristic (extracted characters vs. a normal text page) flags likely-failed scans. The currently used OCR path may not expose reliable per-word confidence, so ClaimFlow also records this separate scan-quality heuristic — it's a detection signal, not a per-word confidence metric.
 - **OCR fallback log** — every page that triggers OCR (no text layer) is logged, with a distinct low-quality-scan warning when OCR yields very little text.
 
-## Human review queue
+## Product UI (Next.js)
 
-The Streamlit UI is a functional review prototype used to validate workflow behavior, not a read-only report — the product interface is being implemented separately in Next.js:
+The operator-facing product interface — App Router, TypeScript, Tailwind, shadcn/ui — lives in [`frontend/`](frontend/). It talks to the FastAPI backend exclusively through its documented, OpenAPI-typed contract (types generated via `openapi-typescript` from a live `/openapi.json` dump — see `frontend/src/lib/api-types.ts`); it never calls doc-intel, the database, or Qdrant directly.
 
+**Routes:** `/dashboard`, `/packages`, `/packages/new`, `/reviews`, `/packages/[packageId]` (the package workspace), `/settings`.
+
+**Package workspace** (`/packages/[packageId]`) is the primary screen: a resizable three-pane layout — document list, original-page viewer with server-rendered bbox evidence highlighting, and a tabbed review panel (Overview / Fields / Validation / Policy evidence / Audit). Selecting a field opens its source document at the right page with the evidence region highlighted; scalar and nested (`service_lines`/`line_items`) fields both support approve/edit/reject; re-running validation calls the same endpoint the Streamlit prototype uses — no validation logic is duplicated in the frontend. On tablet/mobile the document list moves into a Sheet and the viewer/tabs stack vertically instead of resizing side by side.
+
+**Run it:**
+```bash
+cd frontend
+npm install
+cp .env.local.example .env.local   # NEXT_PUBLIC_API_BASE_URL, defaults to localhost:8010
+npm run dev                        # http://localhost:3000 (or next free port)
+```
+Requires the FastAPI backend running (`make api`) and reachable at that URL.
+
+**Streamlit** (`streamlit_app.py`) remains a functional review prototype used to validate workflow behavior during backend development, not the product interface — the Next.js app above is. Streamlit still exercises the same endpoints and is useful for quick backend smoke-testing, but new review-workflow features land in `frontend/` going forward.
+
+Streamlit's own review queue still offers, for reference:
 - Per-field **approve / edit / reject**, with an editable corrected value
-- **Nested/list fields are editable tables** — `diagnosis_codes`, `service_lines`, `line_items` (and any future table-like field) support adding, editing, and deleting rows, not just read-only display
+- **Nested fields are editable.** List-of-object fields such as `service_lines` and `line_items` support row-level add, edit and delete actions, with stable row identity and row-specific confidence/evidence. Flat scalar lists such as `diagnosis_codes` are also editable as a list, but currently retain field-level confidence and evidence rather than independent confidence/evidence per code.
 - **Suggested correction** — surfaces the deterministic validator's own failure reason next to the field it flagged (e.g. "line sum $412.00 does not match total charge $450.00")
 - **Re-run validation** — after edits, re-runs the domain's real deterministic validator against the reviewer's corrected values, not a reimplementation
 - **Export** — reviewed fields, scalar and nested/list alike (original value, action taken, final value, confidence) download as JSON, ready for downstream handoff
@@ -103,7 +119,7 @@ Deterministic, not LLM self-verification — the same numbers, codes, and dates 
 |--------|----------------|
 | Health (CMS-1500) | missing mandatory field, malformed NPI (not exactly 10 digits), invalid ICD-10 code, invalid CPT code, service-line total ≠ claimed total, future date of service |
 | Health (EOB / MSN) | provider charges ≥ allowed charges, non-negative amounts, `is_bill` must be False (an EOB/MSN is informational by design), placeholder-pattern claim number, future service date |
-| Property (Xactimate) | missing mandatory field, line-item sum ≠ replacement cost total, ACV/RCV inconsistency, date of loss outside policy window, negative dollar amounts |
+| Property (Xactimate) | missing mandatory field, line-item sum ≠ printed line-item subtotal, subtotal + overhead + profit + tax ≠ RCV, ACV/RCV inconsistency, date of loss outside policy window, negative dollar amounts |
 | Property (declarations page) | policy period start ≤ end, non-negative coverage limits/deductibles/premium, placeholder-pattern policy number |
 | Loan (SBA application) | missing mandatory field, placeholder-pattern tax ID, business name where a person's name is expected, non-positive loan amount, net income exceeds gross revenue, missing signature |
 | Loan (SBA Form 413) | total assets − total liabilities = net worth (within tolerance), non-negative amounts, future as-of date, business name where a person's name is expected |
@@ -159,7 +175,7 @@ review_reasons:
 }
 ```
 
-`diagnosis_codes` (the field the validator actually flagged) is a list, not a scalar — the review UI renders it as an editable table (add/edit/delete rows), and the export includes per-row action, original/final value, confidence, and evidence, same as scalar fields.
+`diagnosis_codes` (the field the validator actually flagged) is a list, not a scalar. It's editable as a list, and the reviewed export records the original and final values plus the reviewer action per entry — but confidence and evidence currently remain attached to the field as a whole, not independently per code (see [Known limitations](#known-limitations)).
 
 ## Setup
 
@@ -176,7 +192,7 @@ cp .env.example .env
 # 3. Start Qdrant
 make docker-up
 
-# 4. Generate and seed policy documents
+# 4. Generate the demonstration policies and seed all policy PDFs
 uv run python scripts/generate_policies.py
 make seed
 
@@ -203,16 +219,69 @@ make ui
 | `make seed` | Index policy PDFs into Qdrant |
 | `make generate` | Generate synthetic claim packages |
 
+The CMS policy corpus also includes the official Medicare Claims Processing
+Manual Chapter 26 and CMS NPI fact sheet. Their source URLs and the distinction
+between authoritative CMS material and synthetic demonstration policies are
+recorded in [`data/policies/SOURCES.md`](data/policies/SOURCES.md). CMS-1500
+retrieval excludes the synthetic manuals.
+
+## Persistence and workflow state
+
+ClaimFlow persists the package lifecycle rather than returning only a one-off pipeline response. The data model (SQLite via SQLAlchemy, `src/claimflow/db.py`, migrated with Alembic — `alembic/versions/`) separates:
+
+- packages
+- source documents
+- extraction runs (one per document, per attempt — reprocessing creates a new run, it doesn't overwrite the last one)
+- extracted fields (including per-row entries for list-of-object fields, via `parent_field`)
+- validation failures (superseded, not deleted, on revalidation — old failures stay queryable for audit)
+- policy evidence
+- review actions (per-field approve/edit/reject, keeping the machine value, reviewer correction, and note distinct)
+- package decisions (approved/flagged/escalated, one row per decision — a package can have more than one over its life)
+- audit events (`audit_log` table — see [package deletion](#package-deletion-and-audit-retention) below)
+
+Machine-extracted values are retained separately from reviewer corrections and final approved values. Re-running validation (`POST /packages/{id}/validation/re-run`) uses the corrected values without deleting the original extraction or the prior validation-failure history — it marks the old failures `superseded=True` and inserts the new set.
+
+### Package lifecycle
+
+Status values (`PackageStatus` enum, `src/claimflow/schemas/enums.py`):
+
+```text
+uploaded → queued → processing → review_ready → completed
+                              ↘ processing_error / validation_error / retrieval_error
+```
+
+`status` (processing lifecycle) and `decision` (`approved` / `flagged` / `escalated`, the routing outcome) are stored and returned separately — a package's `status` becomes `review_ready` or `completed` regardless of which decision the routing step produced; `flagged`/`escalated` are workflow outcomes for a human reviewer, not final adjudications. Per-field reviewer actions (`approve`/`edit`/`reject`/`add`) are a third, distinct vocabulary — `ReviewActionType`.
+
+A package can be reprocessed (`POST /packages/{id}/process`) after document reclassification or a processing error; this is an atomic compare-and-swap on `status` (`try_start_processing`) so two concurrent `/process` calls can't both run the graph — the second gets a 409. A crash mid-`processing` is recovered at the next app startup (`recover_stale_processing_packages`) rather than left stuck.
+
+### Package deletion and audit retention
+
+`DELETE /packages/{id}` cascades to the package's documents, extraction runs, fields, validation failures, policy evidence, and decisions (real FK `ON DELETE CASCADE`). Audit events are the one exception: `AuditLogEntry.package_id` is deliberately **not** a foreign key — it's a plain indexed string column — so the audit trail survives the package row being deleted.
+
 ## API
+
+22 endpoints. OpenAPI schema is auto-generated by FastAPI and served at `/docs` (Swagger UI) and `/openapi.json`; `tests/test_openapi_contract.py` checks the schema matches the actual response models exactly (it asserts the full route set, so this count can't silently drift from the code).
+
+**Error shape** (all 4xx/5xx responses, `src/claimflow/schemas/errors.py`):
+```json
+{"error": {"code": "PACKAGE_NOT_FOUND", "message": "Package does not exist", "details": null}}
+```
+
+**Idempotency:** `POST /packages/{id}/fields/{field_id}/review` is idempotent — an identical repeated review action (same action, corrected value, reviewer, note) returns the existing row instead of inserting a duplicate. `POST /packages/{id}/process` rejects a concurrent duplicate call with `409 PROCESSING_IN_PROGRESS` rather than running the graph twice.
 
 ### Packages
 ```
 POST   /packages                         Upload one or more files, returns {package_id, status}; processing runs in the background
-GET    /packages                        List all packages (id, status, created_at)
+GET    /packages                        Paginated, filtered package list — page, page_size, status, domain, decision, confidence range, validation rule, date range, search, sort
 GET    /packages/{package_id}            Full package detail (status, decision, extracted fields, validation failures, error)
-DELETE /packages/{package_id}            Delete a package (cascades to its documents/fields/failures/evidence/decisions; keeps its audit trail)
-POST   /packages/{package_id}/process    (Re)trigger processing on an existing package
+DELETE /packages/{package_id}            Delete a package (cascades to its documents/fields/failures/evidence/decisions; keeps its audit trail — see above)
+POST   /packages/{package_id}/process    (Re)trigger processing on an existing package; 409 if already processing
 GET    /packages/{package_id}/status     Lightweight status poll (package_id, status only)
+```
+
+Example — `POST /packages` response:
+```json
+{"package_id": "3f9a1c2e-...", "status": "processing"}
 ```
 
 ### Documents and evidence
@@ -226,18 +295,54 @@ GET  /packages/{package_id}/fields/{field_id}/evidence                     Sourc
 
 ### Review
 ```
-GET  /reviews/queue                                    Packages currently flagged or escalated, across the whole system
+GET  /reviews/queue                                    Paginated review queue — status defaults to review_ready, same filters as GET /packages
 GET  /packages/{package_id}/review                     Fields + validation failures for one package's review
-POST /packages/{package_id}/fields/{field_id}/review    Submit a reviewer action (approve/edit/reject) for one field
+POST /packages/{package_id}/fields/{field_id}/review    Submit a reviewer action (approve/edit/reject) for one field — idempotent, see above
 POST /packages/{package_id}/validation/re-run           Re-run the domain's real validator against corrected field values
-POST /packages/{package_id}/decision                    Record a final decision (approved/flagged/escalated)
+POST /packages/{package_id}/decision                    Record a routing decision (approved/flagged/escalated)
 ```
 
-### Policy support and audit
+Example — `GET /reviews/queue` item:
+```json
+{"package_id": "3f9a1c2e-...", "status": "review_ready", "created_at": "2026-07-13T12:30:00Z"}
+```
+
+Example — `GET /packages/{package_id}/review` (abridged):
+```json
+{
+  "package_id": "3f9a1c2e-...",
+  "status": "review_ready",
+  "fields": [{"field_id": 42, "name": "diagnosis_codes", "value": ["M54.5"], "confidence": 0.91, "field_status": "found", "parent_field": null, "reviewer_action": "edit", "corrected_value": ["M54.50"], "reviewer": "jane", "reviewer_note": null}],
+  "validation_failures": [{"field": "diagnosis_codes", "rule": "icd10_lookup", "reason": "'M54.5' is not a recognized ICD-10-CM code"}]
+}
+```
+
+### Policy support, audit, and dashboard
 ```
 GET /packages/{package_id}/policy-evidence    Cited policy answers for the package's failed validation rules
-GET /packages/{package_id}/audit               Audit log (upload, extract, validate, review_edit, decision events)
+GET /packages/{package_id}/audit               Audit log (upload, extract, validate, review_edit, decision, status_transition events)
 GET /packages/{package_id}/export               Full package export (decision, fields, failures, policy answers)
+GET /dashboard/summary                         Precomputed operational counts (see below) — the frontend should not fetch every package and compute these client-side
+```
+
+### Settings
+```
+GET /settings    Read-only operational config: thresholds, enabled domains, doc-intel/OCR provider, Qdrant target, Langfuse status — no secrets
+```
+
+`GET /dashboard/summary` returns:
+```json
+{
+  "total_packages": 132,
+  "processing": 2,
+  "awaiting_review": 14,
+  "approved": 98,
+  "flagged": 15,
+  "escalated": 3,
+  "processing_errors": 0,
+  "straight_through_rate": 0.74,
+  "top_validation_failures": [{"rule": "icd10_lookup", "count": 6}]
+}
 ```
 
 Example:
@@ -261,6 +366,26 @@ Key settings:
 | `CONFIDENCE_THRESHOLD` | `0.75` | Below this → flagged |
 | `ESCALATION_THRESHOLD` | `0.50` | Below this → escalated |
 | `LANGFUSE_ENABLED` | `false` | Set `true` to enable tracing |
+
+## Tests
+
+```bash
+make test   # pytest
+make lint   # ruff check + format check
+```
+
+210 tests across `tests/`, covering: persistence and DB constraints (`test_db.py`, `test_db_constraints.py`, `test_migrations.py`), the processing state machine (`test_state_machine.py`), API request/response contracts and OpenAPI schema (`test_api.py`, `test_openapi_contract.py`, `test_package_schemas.py`, `test_reporting_schemas.py`, `test_settings.py`), classification override + reprocessing, validation rules (`test_validate.py`, `test_new_domains.py`), review persistence and nested/list-field row identity (`test_review_persistence.py`, `test_review_read_schemas.py`, `test_review_write_schemas.py`, `test_nested_fields.py`), audit events, export, pagination (`test_pagination.py`), upload hardening (`test_upload_hardening.py`), and the real/public eval harness (`test_real_public_eval.py`). `doc-intel` (the extraction dependency) is mocked in these tests; `make eval` / `make eval-real-public` exercise it for real against a live model.
+
+`tests/test_lifecycle.py` is the one most worth reading first — an end-to-end integration test: upload → processing → validation failure → review queue → field correction → validation rerun → decision → audit history → export → delete.
+
+**Frontend** (`frontend/`): Vitest + React Testing Library, 28 tests across 8 files covering status/decision/confidence badges, upload file validation (format/size rejection, including the drag-and-drop path that bypasses the file input's `accept` filter), the decision dialog (reason-required escalation, unresolved-failure warning), the document viewer (evidence highlighting, the no-bbox-available notice), typed scalar and nested-row review actions, validation re-run, audit event rendering, and package-queue loading/empty/error states. HTTP is mocked at the typed-client boundary (`@/lib/api`) — no real network calls in these tests.
+
+```bash
+cd frontend && npm test      # vitest run
+cd frontend && npm run build # production build + typecheck
+node frontend/scripts/e2e-smoke.mjs   # real headless Chromium run against a live backend + real uploaded package
+```
+`scripts/e2e-smoke.mjs` drives dashboard → packages → reviews → new-package → the package workspace (all 5 tabs) → an approve action → settings, against the real running FastAPI backend, and fails loudly on any console/page error. This is what caught a real bug during development: the backend had no CORS configured, so every browser fetch from the Next.js origin to the API was silently blocked (`api/main.py`'s `CORSMiddleware`, `cors_allowed_origins` in `config.py`) — invisible to `curl`-based checks since CORS is browser-enforced, only visible once something actually drove a real browser.
 
 ## Eval
 
@@ -316,7 +441,7 @@ n=1–3, illustrative not statistical — these are real document extraction res
 - Official [CMS-1500 template](https://www.cms.gov/medicare/cms-forms/cms-forms/downloads/cms1500.pdf) (1 file, blank) — 33% field-abstention on a genuinely empty form (model echoes the form's own printed labels as data — a real, root-caused finding, not fixed since it needs schema changes, not a prompt fix).
 - Official [SBA Form 1919](https://www.sba.gov/document/sba-form-1919-borrower-information-form) (1 file, blank) — ~90% blank-field abstention.
 - Official [SBA Form 413](https://www.sba.gov/document/sba-form-413-personal-financial-statement) Personal Financial Statement (1 file, blank) — 92% blank-field abstention (2 of 25 numeric fields, `cash_on_hand` and `savings_accounts`, echoed as `0.0` instead of `null`. The form's own `total_assets`/`total_liabilities`/`net_worth` fields aren't blank — verified directly against the PDF's AcroForm widgets, they carry a literal `0` default baked in by SBA, so the model reading `0` there is correct, not fabricating.).
-- CMS's own [sample Explanation of Benefits](https://www.cms.gov/files/document/11819-sample-explanation-benefits-508.pdf) (1 file) — 10/11 fields correct (11/11 once a list-vs-string metric-comparison artifact is discounted — see `failures.md`). Started at 3/11: the model was reading the document's first service line instead of its own "Total" row; fixed with a prompt clarification, re-verified. One real, still-unresolved gap: `patient_name` returns the document's literal `"XXXXXX"` redaction placeholder instead of null.
+- CMS's own [sample Explanation of Benefits](https://www.cms.gov/files/document/11819-sample-explanation-benefits-508.pdf) (1 file) — all 15 canonical fields match the public reference after normalizing printed redaction placeholders to `null`. Started at 3/11: the model was reading the document's first service line instead of its own "Total" row; fixed with a prompt clarification and deterministic placeholder handling, then re-verified through both EOB and Medicare Summary Notice routing.
 - A public sample [homeowners declarations page](https://www.myfloridacfo.com/docs-sf/consumer-services-libraries/consumerservices-documents/understanding-coverage/sample-declarations-page.pdf) (1 file) — 15/15 fields correct, after correcting one gold-annotation error (an agent's name field wrongly included a license number).
 - The 3 real Xactimate PDFs (linked above) started with 2 real extraction bugs (an insured/adjuster name swap, an ACV-definition ambiguity) — both root-caused and fixed via a prompt clarification, individually verified correct after the fix.
 
@@ -335,16 +460,18 @@ Every downloaded artifact is tracked in `eval/real_public/manifest.json` — sou
 
 ## Known limitations
 
+- **Adding a new row to a nested list field (`service_lines`, `line_items`) isn't supported in the Next.js UI.** Doing this correctly needs the row's field schema (which columns, which types) that isn't exposed by any endpoint today; the button is present but disabled with an explanation, not hidden.
+- **Field-table columns overflow on narrow resizable-pane widths** in the Fields/Validation tabs (Confidence/Reason columns can get clipped at the default 3-pane split) — a real, observed layout issue, not yet fixed; widen the pane or add column truncation/tooltips.
 - **No real private claim-package evaluation yet.** The controlled end-to-end package eval uses synthetic generated packages with gold-labeled injected errors. The real/public eval layer uses public structured datasets, official blank templates, and a small number of public estimate PDFs for validation realism and selected extraction case studies — not private patient, claimant, or borrower packages.
 - **No production HIPAA compliance.** ClaimFlow records application-level workflow audit events (`GET /packages/{id}/audit`), but does not yet provide compliance-grade, tamper-evident audit logging, PHI-specific access auditing, encryption at rest, or a retention policy — don't point this at real patient/claimant data as-is.
 - **No production auth/RBAC.** The API and Streamlit UI have no authentication — anyone who can reach the port can submit and review claims.
 - **MedCaseFlow is not implemented.** Medical/legal case-file intelligence (timeline reconstruction, contradiction detection, missing-evidence detection) is a separate, not-yet-built idea.
-- **Scan quality is a heuristic, not real OCR confidence** — a character-density proxy computed by ClaimFlow over the text doc-intel returns; doc-intel's OCR backends don't expose true per-word confidence (see [OCR proof](#ocr-proof)).
-- **`diagnosis_codes` (a flat string list) has no per-item confidence/evidence** — doc-intel only scores list-of-object fields per row, so a scalar list is scored once, as a whole. `service_lines` and `line_items` (list-of-object fields) DO get independent per-row confidence, evidence, and review actions with stable row identity — see [Human review queue](#human-review-queue).
+- **Scan quality is a heuristic, not real OCR confidence** — a character-density proxy computed by ClaimFlow over the text doc-intel returns; the currently used OCR path may not expose reliable per-word confidence (see [OCR proof](#ocr-proof)).
+- **`diagnosis_codes` (a flat string list) has no per-item confidence/evidence** — doc-intel only scores list-of-object fields per row, so a scalar list is scored once, as a whole. `service_lines` and `line_items` (list-of-object fields) DO get independent per-row confidence, evidence, and review actions with stable row identity — see [Product UI](#product-ui-nextjs).
 - **Field accuracy is exact-match**, normalized for dates/currency but not names/addresses — minor OCR spelling variance counts as wrong even if a human reviewer would accept it.
 - **Blank-field hallucination risk.** A model can fabricate a value for a blank field even when the schema allows null and the prompt says not to guess. Deterministic pattern checks catch this for `tax_id`, `applicant_name`, `billing_provider_npi`, and `claim_number` — generalizable, real-world rules, not synthetic-data hacks. `insurance_id` is mitigated by making the field nullable. `signature_on_file` remains unresolved — it's fundamentally a visual question, and needs vision-based verification, not another prompt tweak.
 - **Health source-evidence accuracy (~85%) is lower than property/loan (~96–100%)** due to CMS-1500's dense form layout — values are often split across adjacent sub-boxes (e.g. date of birth as separate MM/DD/YY cells), which can push fuzzy-match grounding below threshold even when the extracted value itself is correct.
-- **`temperature=0` doesn't guarantee bit-exact reproducibility.** Verified directly — the identical package, through identical code, produced a correctly-null `insurance_id` in some runs and a fabricated one in others. A known GPU-inference characteristic (floating-point non-associativity, batching effects), not a ClaimFlow bug.
+- **`temperature=0` doesn't guarantee bit-exact reproducibility.** Verified directly — the identical package, through identical code, produced a correctly-null `insurance_id` in some runs and a fabricated one in others. Identical requests can still produce small run-to-run variations despite `temperature=0.0`. The observed behavior is consistent with nondeterminism in the model-serving stack, although ClaimFlow mitigates its effects through deterministic validation and review routing.
 
 ### Production hardening still required
 
@@ -361,3 +488,5 @@ Before using ClaimFlow with real regulated data, the following are required:
 ## Tech stack
 
 Python 3.13 · LangGraph · FastAPI · Streamlit · Qdrant · sentence-transformers · PyMuPDF · pydantic-settings · doc-intel (editable dep)
+
+Frontend: Next.js (App Router) · TypeScript · Tailwind CSS · shadcn/ui · TanStack Query · openapi-typescript/openapi-fetch · Vitest + React Testing Library

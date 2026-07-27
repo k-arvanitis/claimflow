@@ -27,6 +27,10 @@ class ReviewFieldSummary(BaseModel):
     confidence: float
     field_status: str
     parent_field: str | None
+    reviewer_action: str | None = None
+    corrected_value: Any | None = None
+    reviewer: str | None = None
+    reviewer_note: str | None = None
 
 
 class ReviewValidationFailure(BaseModel):

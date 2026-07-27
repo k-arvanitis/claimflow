@@ -23,10 +23,15 @@ class AuditEventItem(BaseModel):
 class ExtractionFieldExport(BaseModel):
     name: str
     value: Any | None
+    final_value: Any | None
     confidence: float
     grounded: bool
     valid: bool
     field_status: str
+    parent_field: str | None = None
+    reviewer_action: str | None = None
+    reviewer: str | None = None
+    reviewer_note: str | None = None
 
 
 class PolicyAnswerExport(BaseModel):

@@ -8,19 +8,24 @@ from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, UploadFile
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 
 from claimflow import db, review
 from claimflow.config import settings
+from claimflow.domains import all_domains
 from claimflow.graph import build_graph
 from claimflow.nodes.ingest import INGESTIBLE_SUFFIXES
 from claimflow.nodes.review import review_node
 from claimflow.pages import render_page
 from claimflow.schemas.dashboard import DashboardSummaryResponse
-from claimflow.schemas.documents import DocumentReclassifyRequest, DocumentReclassifyResponse, DocumentSummary
+from claimflow.schemas.documents import (
+    DocumentReclassifyRequest,
+    DocumentReclassifyResponse,
+    DocumentSummary,
+)
 from claimflow.schemas.enums import PackageStatus
 from claimflow.schemas.errors import AppError, ErrorBody, ErrorEnvelope
-from claimflow.schemas.pagination import PaginatedPackagesResponse
 from claimflow.schemas.packages import (
     PackageCreateResponse,
     PackageDeleteResponse,
@@ -28,6 +33,7 @@ from claimflow.schemas.packages import (
     PackageStatusResponse,
     PackageSummary,
 )
+from claimflow.schemas.pagination import PaginatedPackagesResponse
 from claimflow.schemas.reporting import (
     AuditEventItem,
     ExportResponse,
@@ -50,6 +56,7 @@ from claimflow.schemas.review_write import (
     ValidationRerunRequest,
     ValidationRerunResponse,
 )
+from claimflow.schemas.settings import SettingsResponse
 from claimflow.tracing import get_callback
 
 logger = logging.getLogger(__name__)
@@ -63,7 +70,11 @@ async def lifespan(app: FastAPI):
     try:
         recovered = db.recover_stale_processing_packages(session)
         if recovered:
-            logger.warning("Recovered %d stale processing package(s) on startup: %s", len(recovered), recovered)
+            logger.warning(
+                "Recovered %d stale processing package(s) on startup: %s",
+                len(recovered),
+                recovered,
+            )
     finally:
         session.close()
     logger.info("ClaimFlow graph initialised")
@@ -73,7 +84,20 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="ClaimFlow", version="0.1.0", lifespan=lifespan)
 
-ERROR_RESPONSES = {404: {"model": ErrorEnvelope}, 422: {"model": ErrorEnvelope}, 500: {"model": ErrorEnvelope}}
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        o.strip() for o in settings.cors_allowed_origins.split(",") if o.strip()
+    ],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+ERROR_RESPONSES = {
+    404: {"model": ErrorEnvelope},
+    422: {"model": ErrorEnvelope},
+    500: {"model": ErrorEnvelope},
+}
 
 
 @app.exception_handler(AppError)
@@ -101,7 +125,11 @@ async def _validation_error_handler(request, exc: RequestValidationError):
     return JSONResponse(
         status_code=422,
         content=ErrorEnvelope(
-            error=ErrorBody(code="VALIDATION_ERROR", message="Request validation failed", details=exc.errors())
+            error=ErrorBody(
+                code="VALIDATION_ERROR",
+                message="Request validation failed",
+                details=exc.errors(),
+            )
         ).model_dump(),
     )
 
@@ -112,7 +140,9 @@ async def _generic_handler(request, exc):
     return JSONResponse(
         status_code=500,
         content=ErrorEnvelope(
-            error=ErrorBody(code="INTERNAL_ERROR", message="Internal server error", details=None)
+            error=ErrorBody(
+                code="INTERNAL_ERROR", message="Internal server error", details=None
+            )
         ).model_dump(),
     )
 
@@ -134,6 +164,32 @@ async def get_dashboard_summary():
         return DashboardSummaryResponse(**db.compute_dashboard_summary(session))
     finally:
         session.close()
+
+
+@app.get(
+    "/settings",
+    response_model=SettingsResponse,
+    tags=["settings"],
+    responses=ERROR_RESPONSES,
+)
+async def get_settings():
+    from doc_intel.config import OCR_FALLBACK_PROVIDERS, OCR_PROVIDER
+
+    return SettingsResponse(
+        confidence_threshold=settings.confidence_threshold,
+        escalation_threshold=settings.escalation_threshold,
+        enabled_domains=[d.doc_type for d in all_domains()],
+        doc_intel_provider=settings.doc_intel_provider,
+        doc_intel_model=settings.doc_intel_model,
+        ocr_provider=OCR_PROVIDER,
+        ocr_fallback_providers=OCR_FALLBACK_PROVIDERS,
+        qdrant_url=settings.qdrant_url,
+        qdrant_collection=settings.qdrant_collection,
+        langfuse_enabled=settings.langfuse_enabled,
+        anthropic_api_key_configured=bool(
+            settings.anthropic_api_key.get_secret_value()
+        ),
+    )
 
 
 def _classify_exception(graph, config) -> str:
@@ -171,28 +227,65 @@ def _classify_exception(graph, config) -> str:
     return "processing_error"
 
 
-def _run_claim(graph, package_id: str, pkg_dir: Path, doc_type_overrides: dict[str, str] | None = None) -> None:
+def _public_document(doc: dict) -> dict:
+    """Return document metadata without exposing the server-side storage path."""
+    return {
+        "filename": doc.get("filename") or Path(doc.get("path", "")).name,
+        "doc_type": doc.get("doc_type", "unknown"),
+        "has_text_layer": bool(doc.get("has_text_layer", False)),
+        "scan_quality": doc.get("scan_quality"),
+        "classification_reason": doc.get("classification_reason"),
+    }
+
+
+def _public_result(result: dict) -> dict:
+    """Sanitize both new and pre-hardening result blobs at the API boundary."""
+    public = dict(result)
+    public["documents"] = [_public_document(doc) for doc in result.get("documents", [])]
+    return public
+
+
+def _run_claim(
+    graph,
+    package_id: str,
+    pkg_dir: Path,
+    doc_type_overrides: dict[str, str] | None = None,
+) -> None:
     session = db.SessionLocal()
     thread_id = str(uuid.uuid4())
     config = {"callbacks": get_callback(), "configurable": {"thread_id": thread_id}}
     try:
-        state = {"package_dir": str(pkg_dir), "domain": None, "doc_type_overrides": doc_type_overrides or {}}
+        state = {
+            "package_dir": str(pkg_dir),
+            "domain": None,
+            "doc_type_overrides": doc_type_overrides or {},
+        }
         result = graph.invoke(state, config=config)
 
-        response = {
-            "decision": result.get("decision"),
-            "extraction_data": result.get("extraction_data"),
-            "domain": result.get("domain"),
-            "documents": result.get("documents", []),
-            "ocr_log": result.get("ocr_log", []),
-            "extraction_overall_confidence": result.get("extraction_overall_confidence"),
-            "extraction_fields": result.get("extraction_fields", []),
-            "validation_failures": result.get("validation_failures", []),
-            "policy_answers": result.get("policy_answers", []),
-            "review_reasons": result.get("review_reasons", []),
-            "error": result.get("error"),
-        }
-        db.log_audit(session, package_id, "api", "validate", {"validation_failures": response["validation_failures"]})
+        response = _public_result(
+            {
+                "decision": result.get("decision"),
+                "extraction_data": result.get("extraction_data"),
+                "domain": result.get("domain"),
+                "documents": result.get("documents", []),
+                "ocr_log": result.get("ocr_log", []),
+                "extraction_overall_confidence": result.get(
+                    "extraction_overall_confidence"
+                ),
+                "extraction_fields": result.get("extraction_fields", []),
+                "validation_failures": result.get("validation_failures", []),
+                "policy_answers": result.get("policy_answers", []),
+                "review_reasons": result.get("review_reasons", []),
+                "error": result.get("error"),
+            }
+        )
+        db.log_audit(
+            session,
+            package_id,
+            "api",
+            "validate",
+            {"validation_failures": response["validation_failures"]},
+        )
 
         if response["error"]:
             final_status = "processing_error"
@@ -202,13 +295,19 @@ def _run_claim(graph, package_id: str, pkg_dir: Path, doc_type_overrides: dict[s
             final_status = "review_ready"
 
         db.transition_package_status(
-            session, package_id, final_status, reason=f"graph completed, decision={response['decision']}", result=response,
+            session,
+            package_id,
+            final_status,
+            reason=f"graph completed, decision={response['decision']}",
+            result=response,
         )
         db.persist_extraction_result(session, package_id, result)
     except Exception as exc:
         logger.error("Background claim processing failed: %s", exc, exc_info=True)
         failure_status = _classify_exception(graph, config)
-        db.transition_package_status(session, package_id, failure_status, reason=str(exc), error=str(exc))
+        db.transition_package_status(
+            session, package_id, failure_status, reason=str(exc), error=str(exc)
+        )
     finally:
         session.close()
 
@@ -222,12 +321,18 @@ def _run_claim(graph, package_id: str, pkg_dir: Path, doc_type_overrides: dict[s
 )
 async def create_package(files: list[UploadFile], background_tasks: BackgroundTasks):
     if len(files) > settings.max_files_per_package:
-        raise AppError(400, "TOO_MANY_FILES", f"A package may contain at most {settings.max_files_per_package} files")
+        raise AppError(
+            400,
+            "TOO_MANY_FILES",
+            f"A package may contain at most {settings.max_files_per_package} files",
+        )
 
     for f in files:
         name = Path(f.filename or "").name
         if not name or Path(name).suffix.lower() not in INGESTIBLE_SUFFIXES:
-            raise AppError(400, "UNSUPPORTED_FILE_TYPE", f"Unsupported file type: {f.filename!r}")
+            raise AppError(
+                400, "UNSUPPORTED_FILE_TYPE", f"Unsupported file type: {f.filename!r}"
+            )
 
     package_id = str(uuid.uuid4())
     pkg_dir = Path(settings.storage_dir) / package_id
@@ -252,7 +357,8 @@ async def create_package(files: list[UploadFile], background_tasks: BackgroundTa
                     written += len(chunk)
                     if written > settings.max_upload_size_bytes:
                         raise AppError(
-                            400, "FILE_TOO_LARGE",
+                            400,
+                            "FILE_TOO_LARGE",
                             f"{f.filename!r} exceeds the {settings.max_upload_size_bytes}-byte limit",
                         )
                     out.write(chunk)
@@ -263,8 +369,11 @@ async def create_package(files: list[UploadFile], background_tasks: BackgroundTa
     session = db.SessionLocal()
     try:
         db.create_package(session, package_id)
-        db.log_audit(session, package_id, "api", "upload", {"filenames": list(used_names)})
-        db.transition_package_status(session, package_id, "queued", reason="upload complete")
+        db.log_audit(
+            session, package_id, "api", "upload", {"filenames": list(used_names)}
+        )
+        if not db.try_start_processing(session, package_id):
+            raise RuntimeError("Could not reserve package for processing")
     except Exception:
         shutil.rmtree(pkg_dir, ignore_errors=True)
         raise
@@ -272,7 +381,7 @@ async def create_package(files: list[UploadFile], background_tasks: BackgroundTa
         session.close()
 
     background_tasks.add_task(_run_claim, app.state.graph, package_id, pkg_dir)
-    return PackageCreateResponse(package_id=package_id, status=PackageStatus.QUEUED)
+    return PackageCreateResponse(package_id=package_id, status=PackageStatus.PROCESSING)
 
 
 @app.get(
@@ -298,14 +407,27 @@ async def list_packages(
     session = db.SessionLocal()
     try:
         rows, total = db.list_packages_filtered(
-            session, status=status, domain=domain, decision=decision,
-            confidence_min=confidence_min, confidence_max=confidence_max,
-            validation_rule=validation_rule, date_from=date_from, date_to=date_to,
-            search=search, sort=sort, page=page, page_size=page_size,
+            session,
+            status=status,
+            domain=domain,
+            decision=decision,
+            confidence_min=confidence_min,
+            confidence_max=confidence_max,
+            validation_rule=validation_rule,
+            date_from=date_from,
+            date_to=date_to,
+            search=search,
+            sort=sort,
+            page=page,
+            page_size=page_size,
         )
         return PaginatedPackagesResponse(
-            items=[PackageSummary(package_id=pkg.id, status=pkg.status, created_at=pkg.created_at) for pkg in rows],
-            page=page, page_size=min(page_size, db.MAX_PAGE_SIZE), total=total,
+            items=[
+                PackageSummary(**db.package_read_model(session, pkg)) for pkg in rows
+            ],
+            page=page,
+            page_size=min(page_size, db.MAX_PAGE_SIZE),
+            total=total,
         )
     finally:
         session.close()
@@ -323,11 +445,17 @@ async def get_package(package_id: str):
         pkg = db.get_package(session, package_id)
         if pkg is None:
             raise AppError(404, "PACKAGE_NOT_FOUND", "Package does not exist")
+        stored_result = json.loads(pkg.result_json) if pkg.result_json else None
         return PackageDetailResponse(
             package_id=pkg.id,
             status=pkg.status,
-            result=json.loads(pkg.result_json) if pkg.result_json else None,
+            result=_public_result(stored_result) if stored_result is not None else None,
             error=pkg.error,
+            **{
+                k: v
+                for k, v in db.package_read_model(session, pkg).items()
+                if k not in ("package_id", "status")
+            },
         )
     finally:
         session.close()
@@ -373,12 +501,16 @@ async def process_package(package_id: str, background_tasks: BackgroundTasks):
         }
         started = db.try_start_processing(session, package_id)
         if not started:
-            raise AppError(409, "PROCESSING_IN_PROGRESS", "Package is already being processed")
+            raise AppError(
+                409, "PROCESSING_IN_PROGRESS", "Package is already being processed"
+            )
     finally:
         session.close()
 
     pkg_dir = Path(settings.storage_dir) / package_id
-    background_tasks.add_task(_run_claim, app.state.graph, package_id, pkg_dir, overrides)
+    background_tasks.add_task(
+        _run_claim, app.state.graph, package_id, pkg_dir, overrides
+    )
     return PackageCreateResponse(package_id=package_id, status=PackageStatus.PROCESSING)
 
 
@@ -410,9 +542,13 @@ async def list_package_documents(package_id: str):
     try:
         return [
             DocumentSummary(
-                document_id=doc.id, filename=Path(doc.path).name, doc_type=doc.doc_type,
-                has_text_layer=doc.has_text_layer, scan_quality=doc.scan_quality,
-                classification_reason=doc.classification_reason, manually_overridden=doc.manually_overridden,
+                document_id=doc.id,
+                filename=Path(doc.path).name,
+                doc_type=doc.doc_type,
+                has_text_layer=doc.has_text_layer,
+                scan_quality=doc.scan_quality,
+                classification_reason=doc.classification_reason,
+                manually_overridden=doc.manually_overridden,
             )
             for doc in db.list_documents(session, package_id)
         ]
@@ -433,9 +569,13 @@ async def get_package_document(package_id: str, document_id: str):
         if doc is None or doc.package_id != package_id:
             raise AppError(404, "DOCUMENT_NOT_FOUND", "Document does not exist")
         return DocumentSummary(
-            document_id=doc.id, filename=Path(doc.path).name, doc_type=doc.doc_type,
-            has_text_layer=doc.has_text_layer, scan_quality=doc.scan_quality,
-            classification_reason=doc.classification_reason, manually_overridden=doc.manually_overridden,
+            document_id=doc.id,
+            filename=Path(doc.path).name,
+            doc_type=doc.doc_type,
+            has_text_layer=doc.has_text_layer,
+            scan_quality=doc.scan_quality,
+            classification_reason=doc.classification_reason,
+            manually_overridden=doc.manually_overridden,
         )
     finally:
         session.close()
@@ -447,7 +587,9 @@ async def get_package_document(package_id: str, document_id: str):
     tags=["documents"],
     responses=ERROR_RESPONSES,
 )
-async def reclassify_document(package_id: str, document_id: str, body: DocumentReclassifyRequest):
+async def reclassify_document(
+    package_id: str, document_id: str, body: DocumentReclassifyRequest
+):
     session = db.SessionLocal()
     try:
         doc = db.get_document(session, document_id)
@@ -460,12 +602,17 @@ async def reclassify_document(package_id: str, document_id: str, body: DocumentR
         session.commit()
 
         db.log_audit(
-            session, package_id, body.reviewer, "reclassify",
+            session,
+            package_id,
+            body.reviewer,
+            "reclassify",
             {"document_id": document_id, "doc_type": doc.doc_type},
         )
         return DocumentReclassifyResponse(
-            document_id=doc.id, doc_type=doc.doc_type,
-            classification_reason=doc.classification_reason, manually_overridden=doc.manually_overridden,
+            document_id=doc.id,
+            doc_type=doc.doc_type,
+            classification_reason=doc.classification_reason,
+            manually_overridden=doc.manually_overridden,
         )
     finally:
         session.close()
@@ -476,7 +623,9 @@ async def reclassify_document(package_id: str, document_id: str, body: DocumentR
     tags=["documents"],
     responses=ERROR_RESPONSES,
 )
-async def get_document_page_image(package_id: str, document_id: str, page: int, bbox: str | None = None):
+async def get_document_page_image(
+    package_id: str, document_id: str, page: int, bbox: str | None = None
+):
     session = db.SessionLocal()
     try:
         doc = db.get_document(session, document_id)
@@ -488,7 +637,10 @@ async def get_document_page_image(package_id: str, document_id: str, page: int, 
             resolved_pkg_dir = pkg_dir.resolve()
         except OSError:
             raise AppError(404, "DOCUMENT_NOT_FOUND", "Document does not exist")
-        if resolved_pkg_dir not in resolved_doc_path.parents and resolved_doc_path != resolved_pkg_dir:
+        if (
+            resolved_pkg_dir not in resolved_doc_path.parents
+            and resolved_doc_path != resolved_pkg_dir
+        ):
             raise AppError(404, "DOCUMENT_NOT_FOUND", "Document does not exist")
     finally:
         session.close()
@@ -572,14 +724,27 @@ async def reviews_queue(
     session = db.SessionLocal()
     try:
         rows, total = db.list_packages_filtered(
-            session, status=status or "review_ready", domain=domain, decision=decision,
-            confidence_min=confidence_min, confidence_max=confidence_max,
-            validation_rule=validation_rule, date_from=date_from, date_to=date_to,
-            search=search, sort=sort, page=page, page_size=page_size,
+            session,
+            status=status or "review_ready",
+            domain=domain,
+            decision=decision,
+            confidence_min=confidence_min,
+            confidence_max=confidence_max,
+            validation_rule=validation_rule,
+            date_from=date_from,
+            date_to=date_to,
+            search=search,
+            sort=sort,
+            page=page,
+            page_size=page_size,
         )
         return PaginatedPackagesResponse(
-            items=[PackageSummary(package_id=pkg.id, status=pkg.status, created_at=pkg.created_at) for pkg in rows],
-            page=page, page_size=min(page_size, db.MAX_PAGE_SIZE), total=total,
+            items=[
+                PackageSummary(**db.package_read_model(session, pkg)) for pkg in rows
+            ],
+            page=page,
+            page_size=min(page_size, db.MAX_PAGE_SIZE),
+            total=total,
         )
     finally:
         session.close()
@@ -601,22 +766,47 @@ async def get_package_review(package_id: str):
 
         run = db.latest_extraction_run_for_package(session, package_id)
         fields = db.list_extracted_fields_for_run(session, run.id) if run else []
-        failures = db.list_validation_failures_for_run(session, run.id, current_only=True) if run else []
+        failures = (
+            db.list_validation_failures_for_run(session, run.id, current_only=True)
+            if run
+            else []
+        )
+        review_actions = (
+            db.latest_review_actions_for_run(session, run.id) if run else {}
+        )
 
         return PackageReviewResponse(
             package_id=package_id,
             status=pkg.status,
             fields=[
                 ReviewFieldSummary(
-                    field_id=f.id, name=f.name,
+                    field_id=f.id,
+                    name=f.name,
                     value=json.loads(f.value_json) if f.value_json else None,
-                    confidence=f.confidence, field_status=f.field_status,
+                    confidence=f.confidence,
+                    field_status=f.field_status,
                     parent_field=f.parent_field,
+                    reviewer_action=review_actions[f.name].action
+                    if f.name in review_actions
+                    else None,
+                    corrected_value=(
+                        json.loads(review_actions[f.name].corrected_value_json)
+                        if f.name in review_actions
+                        and review_actions[f.name].corrected_value_json
+                        else None
+                    ),
+                    reviewer=review_actions[f.name].reviewer
+                    if f.name in review_actions
+                    else None,
+                    reviewer_note=review_actions[f.name].note
+                    if f.name in review_actions
+                    else None,
                 )
                 for f in fields
             ],
             validation_failures=[
-                ReviewValidationFailure(field=vf.field, rule=vf.rule, reason=vf.reason) for vf in failures
+                ReviewValidationFailure(field=vf.field, rule=vf.rule, reason=vf.reason)
+                for vf in failures
             ],
         )
     finally:
@@ -641,11 +831,16 @@ async def submit_field_review(package_id: str, field_id: int, body: FieldReviewR
         if doc is None or doc.package_id != package_id:
             raise AppError(404, "FIELD_NOT_FOUND", "Field does not exist")
 
-        failures_before = db.list_validation_failures_for_run(session, run.id, current_only=True)
+        failures_before = db.list_validation_failures_for_run(
+            session, run.id, current_only=True
+        )
         validation_before = [f.reason for f in failures_before if f.field == field.name]
 
         action = db.record_review_action(
-            session, run.id, field.name, body.action.value,
+            session,
+            run.id,
+            field.name,
+            body.action.value,
             original_value=json.loads(field.value_json) if field.value_json else None,
             corrected_value=body.corrected_value,
             validation_before=validation_before,
@@ -653,10 +848,20 @@ async def submit_field_review(package_id: str, field_id: int, body: FieldReviewR
             reviewer=body.reviewer,
             note=body.note,
         )
-        db.log_audit(session, package_id, action.reviewer, "review_edit", {"field": field.name, "action": action.action})
+        db.log_audit(
+            session,
+            package_id,
+            action.reviewer,
+            "review_edit",
+            {"field": field.name, "action": action.action},
+        )
         return FieldReviewResponse(
-            field_id=field_id, action=action.action, reviewer=action.reviewer,
-            corrected_value=json.loads(action.corrected_value_json) if action.corrected_value_json else None,
+            field_id=field_id,
+            action=action.action,
+            reviewer=action.reviewer,
+            corrected_value=json.loads(action.corrected_value_json)
+            if action.corrected_value_json
+            else None,
         )
     finally:
         session.close()
@@ -677,17 +882,28 @@ async def rerun_package_validation(package_id: str, body: ValidationRerunRequest
         result = json.loads(pkg.result_json) if pkg.result_json else {}
         run = db.latest_extraction_run_for_package(session, package_id)
         previous_decision_row = db.latest_decision_for_package(session, package_id)
-        previous_decision = previous_decision_row.decision if previous_decision_row else None
+        previous_decision = (
+            previous_decision_row.decision if previous_decision_row else None
+        )
 
         domain = result.get("domain")
-        merged = dict(result.get("extraction_data") or {})
-        merged.update(body.corrected_fields)
+        actions = db.latest_review_actions_for_run(session, run.id) if run else {}
+        merged = review.merge_reviewed_values(
+            result.get("extraction_data") or {},
+            actions,
+            body.corrected_fields,
+        )
         failures = review.rerun_validation(domain, merged)
 
         if run is not None:
             db.supersede_validation_failures(session, run.id)
             db.create_validation_failures(
-                session, run.id, [{"field": f["field"], "rule": f["rule"], "reason": f["reason"]} for f in failures]
+                session,
+                run.id,
+                [
+                    {"field": f["field"], "rule": f["rule"], "reason": f["reason"]}
+                    for f in failures
+                ],
             )
 
         review_state = {
@@ -697,16 +913,37 @@ async def rerun_package_validation(package_id: str, body: ValidationRerunRequest
         }
         outcome = review_node(review_state)
         new_decision = outcome["decision"]
+        db.create_decision(session, package_id, new_decision, outcome["review_reasons"])
+
+        result.update(
+            {
+                "reviewed_data": merged,
+                "validation_failures": [dict(f) for f in failures],
+                "decision": new_decision,
+                "review_reasons": outcome["review_reasons"],
+            }
+        )
+        db.update_package_status(session, package_id, pkg.status, result=result)
 
         db.log_audit(
-            session, package_id, "api", "validation_rerun",
-            {"validation_failures": [dict(f) for f in failures], "decision": new_decision, "previous_decision": previous_decision},
+            session,
+            package_id,
+            "api",
+            "validation_rerun",
+            {
+                "validation_failures": [dict(f) for f in failures],
+                "decision": new_decision,
+                "previous_decision": previous_decision,
+            },
         )
     finally:
         session.close()
 
     return ValidationRerunResponse(
-        validation_failures=[ValidationFailureItem(field=f["field"], rule=f["rule"], reason=f["reason"]) for f in failures],
+        validation_failures=[
+            ValidationFailureItem(field=f["field"], rule=f["rule"], reason=f["reason"])
+            for f in failures
+        ],
         decision=new_decision,
         decision_changed=new_decision != previous_decision,
         previous_decision=previous_decision,
@@ -726,8 +963,30 @@ async def submit_package_decision(package_id: str, body: DecisionRequest):
         pkg = db.get_package(session, package_id)
         if pkg is None:
             raise AppError(404, "PACKAGE_NOT_FOUND", "Package does not exist")
-        decision = db.create_decision(session, package_id, body.decision.value, body.review_reasons)
-        db.log_audit(session, package_id, "reviewer", "decision", {"decision": decision.decision})
+        decision = db.create_decision(
+            session, package_id, body.decision.value, body.review_reasons
+        )
+        result = json.loads(pkg.result_json) if pkg.result_json else {}
+        result.update(
+            {"decision": decision.decision, "review_reasons": body.review_reasons}
+        )
+
+        target_status = (
+            "completed" if decision.decision == "approved" else "review_ready"
+        )
+        if pkg.status != target_status:
+            db.transition_package_status(
+                session,
+                package_id,
+                target_status,
+                reason=f"reviewer decision={decision.decision}",
+                result=result,
+            )
+        else:
+            db.update_package_status(session, package_id, target_status, result=result)
+        db.log_audit(
+            session, package_id, "reviewer", "decision", {"decision": decision.decision}
+        )
         return DecisionResponse(package_id=package_id, decision=decision.decision)
     finally:
         session.close()
@@ -744,7 +1003,8 @@ async def get_policy_evidence(package_id: str):
     try:
         return [
             PolicyEvidenceItem(
-                question=pe.question, answer=pe.answer,
+                question=pe.question,
+                answer=pe.answer,
                 citations=json.loads(pe.citations_json),
             )
             for pe in db.list_policy_evidence_for_package(session, package_id)
@@ -764,7 +1024,9 @@ async def get_audit_trail(package_id: str):
     try:
         return [
             AuditEventItem(
-                actor=entry.actor, action=entry.action, timestamp=entry.timestamp,
+                actor=entry.actor,
+                action=entry.action,
+                timestamp=entry.timestamp,
                 detail=json.loads(entry.detail_json) if entry.detail_json else None,
             )
             for entry in db.list_audit_events_for_package(session, package_id)
@@ -787,15 +1049,63 @@ async def export_package(package_id: str):
         if pkg is None:
             raise AppError(404, "PACKAGE_NOT_FOUND", "Package does not exist")
         result = json.loads(pkg.result_json) if pkg.result_json else {}
+        run = db.latest_extraction_run_for_package(session, package_id)
+        fields = db.list_extracted_fields_for_run(session, run.id) if run else []
+        actions = db.latest_review_actions_for_run(session, run.id) if run else {}
+        reviewed_data = review.merge_reviewed_values(
+            result.get("extraction_data") or {}, actions
+        )
+        failures = (
+            db.list_validation_failures_for_run(session, run.id, current_only=True)
+            if run
+            else []
+        )
+        latest_decision = db.latest_decision_for_package(session, package_id)
+
+        exported_fields = []
+        for field in fields:
+            machine_value = json.loads(field.value_json) if field.value_json else None
+            action = actions.get(field.name)
+            if action and action.action in ("edit", "add"):
+                final_value = (
+                    json.loads(action.corrected_value_json)
+                    if action.corrected_value_json
+                    else None
+                )
+            elif action and action.action == "reject":
+                final_value = None
+            elif field.parent_field is None and field.name in reviewed_data:
+                final_value = reviewed_data[field.name]
+            else:
+                final_value = machine_value
+            exported_fields.append(
+                ExtractionFieldExport(
+                    name=field.name,
+                    value=machine_value,
+                    final_value=final_value,
+                    confidence=field.confidence,
+                    grounded=field.grounded,
+                    valid=field.valid,
+                    field_status=field.field_status,
+                    parent_field=field.parent_field,
+                    reviewer_action=action.action if action else None,
+                    reviewer=action.reviewer if action else None,
+                    reviewer_note=action.note if action else None,
+                )
+            )
+
         return ExportResponse(
             package_id=package_id,
             status=pkg.status,
-            decision=result.get("decision"),
+            decision=latest_decision.decision
+            if latest_decision
+            else result.get("decision"),
             domain=result.get("domain"),
-            extraction_fields=[
-                ExtractionFieldExport(**f) for f in result.get("extraction_fields", [])
+            extraction_fields=exported_fields,
+            validation_failures=[
+                ValidationFailureItem(field=f.field, rule=f.rule, reason=f.reason)
+                for f in failures
             ],
-            validation_failures=result.get("validation_failures", []),
             policy_answers=[
                 PolicyAnswerExport(**a) for a in result.get("policy_answers", [])
             ],

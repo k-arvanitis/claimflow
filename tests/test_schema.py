@@ -43,3 +43,30 @@ def test_spec_has_required_fields():
     assert CMS1500_SPEC.name == "cms1500"
     assert CMS1500_SPEC.model is CMS1500
     assert "CMS-1500" in CMS1500_SPEC.system_prompt
+
+
+def test_cms1500_schema_covers_contact_and_full_service_line_fields():
+    claim_fields = CMS1500.model_fields
+    line_fields = ServiceLine.model_fields
+
+    assert {
+        "patient_phone",
+        "insured_phone",
+        "other_insured_name",
+        "referring_provider_qualifier",
+        "prior_authorization_number",
+        "service_facility_npi",
+        "billing_provider_phone",
+        "billing_provider_other_id",
+        "physician_signature_name",
+        "physician_signature_date",
+    } <= claim_fields.keys()
+    assert {
+        "service_to_date",
+        "emergency_indicator",
+        "modifier_2",
+        "modifier_3",
+        "modifier_4",
+        "epsdt_family_plan",
+        "rendering_provider_id_qualifier",
+    } <= line_fields.keys()

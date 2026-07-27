@@ -101,6 +101,7 @@ if run_button:
     session = db.SessionLocal()
     try:
         db.create_package(session, package_id)
+        db.try_start_processing(session, package_id)
 
         with st.spinner("Running pipeline…"):
             if mode == "Upload files":
@@ -125,10 +126,22 @@ if run_button:
                 "validation_failures": result.get("validation_failures", []),
                 "decision": result.get("decision"),
             })
-            db.update_package_status(session, package_id, "completed", result={
+            db.persist_extraction_result(session, package_id, result)
+            if result.get("error"):
+                final_status = "processing_error"
+            elif result.get("decision") == "approved":
+                final_status = "completed"
+            else:
+                final_status = "review_ready"
+            db.transition_package_status(session, package_id, final_status, reason="Streamlit graph completed", result={
                 "decision": result.get("decision"),
                 "domain": result.get("domain"),
+                "extraction_data": result.get("extraction_data"),
+                "extraction_fields": result.get("extraction_fields", []),
                 "validation_failures": result.get("validation_failures", []),
+                "policy_answers": result.get("policy_answers", []),
+                "review_reasons": result.get("review_reasons", []),
+                "error": result.get("error"),
             })
     finally:
         session.close()

@@ -11,21 +11,44 @@ def _make_pdf_bytes() -> bytes:
 
 def test_health():
     from api.main import app
+
     client = TestClient(app)
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
 
 
+def test_cors_allows_frontend_origin():
+    from api.main import app
+
+    client = TestClient(app)
+    response = client.get("/health", headers={"Origin": "http://localhost:3001"})
+    assert response.headers["access-control-allow-origin"] == "http://localhost:3001"
+
+
 def test_post_packages_returns_decision():
     fake_result = {
         "package_dir": "/tmp/test",
         "domain": "cms1500",
-        "documents": [{"path": "/tmp/test/claim.pdf", "doc_type": "cms1500", "has_text_layer": True, "scan_quality": None}],
+        "documents": [
+            {
+                "path": "/tmp/test/claim.pdf",
+                "doc_type": "cms1500",
+                "has_text_layer": True,
+                "scan_quality": None,
+            }
+        ],
         "extraction_data": {"patient_name": "DOE JOHN"},
         "extraction_fields": [
-            {"name": "patient_name", "value": "DOE JOHN", "confidence": 0.95,
-             "grounded": True, "valid": True, "field_status": "found", "evidence": None},
+            {
+                "name": "patient_name",
+                "value": "DOE JOHN",
+                "confidence": 0.95,
+                "grounded": True,
+                "valid": True,
+                "field_status": "found",
+                "evidence": None,
+            },
         ],
         "extraction_status": "pass",
         "extraction_overall_confidence": 0.88,
@@ -42,14 +65,18 @@ def test_post_packages_returns_decision():
     with patch("api.main.build_graph", return_value=mock_graph):
         from api.main import app
         from claimflow import db
+
         with TestClient(app) as client:
             pdf_bytes = _make_pdf_bytes()
             response = client.post(
                 "/packages",
-                files=[("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))],
+                files=[
+                    ("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))
+                ],
             )
             assert response.status_code == 200
             queued = response.json()
+            assert queued["status"] == "processing"
             package_id = queued["package_id"]
 
             result = client.get(f"/packages/{package_id}")
@@ -58,6 +85,25 @@ def test_post_packages_returns_decision():
     data = result.json()
     assert data["status"] == "completed"
     assert data["result"]["decision"] == "approved"
+    assert data["result"]["documents"] == [
+        {
+            "filename": "claim.pdf",
+            "doc_type": "cms1500",
+            "has_text_layer": True,
+            "scan_quality": None,
+            "classification_reason": None,
+        }
+    ]
+    assert "path" not in data["result"]["documents"][0]
+    assert data["domain"] == "cms1500"
+    assert data["overall_confidence"] == 0.88
+    assert data["document_count"] == 1
+    assert data["validation_failure_count"] == 0
+    assert (
+        data["decision"] == "approved"
+    )  # persist_extraction_result records a Decision row on graph completion
+    assert data["review_reasons"] == []
+    assert data["created_at"] and data["updated_at"]
 
     session = db.SessionLocal()
     try:
@@ -71,7 +117,10 @@ def test_post_packages_returns_decision():
         )
         assert (
             session.query(db.ExtractedField)
-            .join(db.ExtractionRun, db.ExtractedField.extraction_run_id == db.ExtractionRun.id)
+            .join(
+                db.ExtractionRun,
+                db.ExtractedField.extraction_run_id == db.ExtractionRun.id,
+            )
             .join(db.Document, db.ExtractionRun.document_id == db.Document.id)
             .filter(db.Document.package_id == package_id)
             .count()
@@ -83,8 +132,8 @@ def test_post_packages_returns_decision():
 
 def test_get_packages_lists_all():
     from api.main import app
+
     with TestClient(app) as client:
-        pdf_bytes = _make_pdf_bytes()
         with patch("api.main.build_graph", return_value=MagicMock()):
             response = client.get("/packages")
     assert response.status_code == 200
@@ -93,6 +142,7 @@ def test_get_packages_lists_all():
 
 def test_get_package_404_for_unknown_id():
     from api.main import app
+
     with TestClient(app) as client:
         response = client.get("/packages/does-not-exist")
     assert response.status_code == 404
@@ -104,17 +154,27 @@ def test_delete_package():
 
     mock_graph = MagicMock()
     mock_graph.invoke.return_value = {
-        "domain": None, "documents": [], "extraction_fields": [], "extraction_status": None,
-        "extraction_overall_confidence": None, "validation_failures": [], "policy_answers": [],
-        "decision": None, "review_reasons": [], "error": None,
+        "domain": None,
+        "documents": [],
+        "extraction_fields": [],
+        "extraction_status": None,
+        "extraction_overall_confidence": None,
+        "validation_failures": [],
+        "policy_answers": [],
+        "decision": None,
+        "review_reasons": [],
+        "error": None,
     }
     with patch("api.main.build_graph", return_value=mock_graph):
         from api.main import app
+
         with TestClient(app) as client:
             pdf_bytes = _make_pdf_bytes()
             response = client.post(
                 "/packages",
-                files=[("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))],
+                files=[
+                    ("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))
+                ],
             )
             package_id = response.json()["package_id"]
 
@@ -136,16 +196,25 @@ def test_reprocess_package():
 
     mock_graph = MagicMock()
     mock_graph.invoke.return_value = {
-        "domain": None, "documents": [], "extraction_fields": [], "extraction_status": None,
-        "extraction_overall_confidence": None, "validation_failures": [], "policy_answers": [],
-        "decision": None, "review_reasons": [], "error": None,
+        "domain": None,
+        "documents": [],
+        "extraction_fields": [],
+        "extraction_status": None,
+        "extraction_overall_confidence": None,
+        "validation_failures": [],
+        "policy_answers": [],
+        "decision": None,
+        "review_reasons": [],
+        "error": None,
     }
     with patch("api.main.build_graph", return_value=mock_graph):
         with TestClient(app) as client:
             pdf_bytes = _make_pdf_bytes()
             response = client.post(
                 "/packages",
-                files=[("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))],
+                files=[
+                    ("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))
+                ],
             )
             package_id = response.json()["package_id"]
 
@@ -158,6 +227,7 @@ def test_reprocess_package():
 
 def test_reprocess_unknown_package_404():
     from api.main import app
+
     with TestClient(app) as client:
         response = client.post("/packages/does-not-exist/process")
     assert response.status_code == 404
@@ -168,16 +238,25 @@ def test_package_status():
 
     mock_graph = MagicMock()
     mock_graph.invoke.return_value = {
-        "domain": None, "documents": [], "extraction_fields": [], "extraction_status": None,
-        "extraction_overall_confidence": None, "validation_failures": [], "policy_answers": [],
-        "decision": None, "review_reasons": [], "error": None,
+        "domain": None,
+        "documents": [],
+        "extraction_fields": [],
+        "extraction_status": None,
+        "extraction_overall_confidence": None,
+        "validation_failures": [],
+        "policy_answers": [],
+        "decision": None,
+        "review_reasons": [],
+        "error": None,
     }
     with patch("api.main.build_graph", return_value=mock_graph):
         with TestClient(app) as client:
             pdf_bytes = _make_pdf_bytes()
             response = client.post(
                 "/packages",
-                files=[("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))],
+                files=[
+                    ("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))
+                ],
             )
             package_id = response.json()["package_id"]
 
@@ -195,16 +274,31 @@ def test_get_documents_for_package():
     mock_graph = MagicMock()
     mock_graph.invoke.return_value = {
         "domain": "cms1500",
-        "documents": [{"path": "/tmp/claim.pdf", "doc_type": "cms1500", "has_text_layer": True, "scan_quality": None}],
-        "extraction_fields": [], "extraction_status": "pass", "extraction_overall_confidence": 0.9,
-        "validation_failures": [], "policy_answers": [], "decision": "approved", "review_reasons": [], "error": None,
+        "documents": [
+            {
+                "path": "/tmp/claim.pdf",
+                "doc_type": "cms1500",
+                "has_text_layer": True,
+                "scan_quality": None,
+            }
+        ],
+        "extraction_fields": [],
+        "extraction_status": "pass",
+        "extraction_overall_confidence": 0.9,
+        "validation_failures": [],
+        "policy_answers": [],
+        "decision": "approved",
+        "review_reasons": [],
+        "error": None,
     }
     with patch("api.main.build_graph", return_value=mock_graph):
         with TestClient(app) as client:
             pdf_bytes = _make_pdf_bytes()
             response = client.post(
                 "/packages",
-                files=[("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))],
+                files=[
+                    ("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))
+                ],
             )
             package_id = response.json()["package_id"]
 
@@ -228,6 +322,7 @@ def test_get_documents_for_package():
 
 def test_get_document_404_wrong_package():
     from api.main import app
+
     with TestClient(app) as client:
         response = client.get("/packages/some-package/documents/does-not-exist")
     assert response.status_code == 404
@@ -235,6 +330,7 @@ def test_get_document_404_wrong_package():
 
 def test_get_field_evidence_404_for_unknown_field():
     from api.main import app
+
     with TestClient(app) as client:
         response = client.get("/packages/some-package/fields/999999/evidence")
     assert response.status_code == 404
@@ -242,22 +338,37 @@ def test_get_field_evidence_404_for_unknown_field():
 
 def test_reviews_queue_lists_flagged_packages():
     from api.main import app
-    from claimflow import db
 
     mock_graph = MagicMock()
     mock_graph.invoke.return_value = {
         "domain": "cms1500",
-        "documents": [{"path": "/tmp/claim.pdf", "doc_type": "cms1500", "has_text_layer": True, "scan_quality": None}],
-        "extraction_fields": [], "extraction_status": "review", "extraction_overall_confidence": 0.5,
-        "validation_failures": [{"field": "diagnosis_codes", "rule": "icd10_lookup", "reason": "bad code"}],
-        "policy_answers": [], "decision": "flagged", "review_reasons": ["bad code"], "error": None,
+        "documents": [
+            {
+                "path": "/tmp/claim.pdf",
+                "doc_type": "cms1500",
+                "has_text_layer": True,
+                "scan_quality": None,
+            }
+        ],
+        "extraction_fields": [],
+        "extraction_status": "review",
+        "extraction_overall_confidence": 0.5,
+        "validation_failures": [
+            {"field": "diagnosis_codes", "rule": "icd10_lookup", "reason": "bad code"}
+        ],
+        "policy_answers": [],
+        "decision": "flagged",
+        "review_reasons": ["bad code"],
+        "error": None,
     }
     with patch("api.main.build_graph", return_value=mock_graph):
         with TestClient(app) as client:
             pdf_bytes = _make_pdf_bytes()
             response = client.post(
                 "/packages",
-                files=[("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))],
+                files=[
+                    ("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))
+                ],
             )
             package_id = response.json()["package_id"]
 
@@ -274,21 +385,43 @@ def test_package_review_view():
     mock_graph = MagicMock()
     mock_graph.invoke.return_value = {
         "domain": "cms1500",
-        "documents": [{"path": "/tmp/claim.pdf", "doc_type": "cms1500", "has_text_layer": True, "scan_quality": None}],
-        "extraction_fields": [
-            {"name": "diagnosis_codes", "value": ["XXXXX"], "confidence": 0.5,
-             "grounded": True, "valid": False, "field_status": "found", "evidence": None},
+        "documents": [
+            {
+                "path": "/tmp/claim.pdf",
+                "doc_type": "cms1500",
+                "has_text_layer": True,
+                "scan_quality": None,
+            }
         ],
-        "extraction_status": "review", "extraction_overall_confidence": 0.5,
-        "validation_failures": [{"field": "diagnosis_codes", "rule": "icd10_lookup", "reason": "bad code"}],
-        "policy_answers": [], "decision": "flagged", "review_reasons": ["bad code"], "error": None,
+        "extraction_fields": [
+            {
+                "name": "diagnosis_codes",
+                "value": ["XXXXX"],
+                "confidence": 0.5,
+                "grounded": True,
+                "valid": False,
+                "field_status": "found",
+                "evidence": None,
+            },
+        ],
+        "extraction_status": "review",
+        "extraction_overall_confidence": 0.5,
+        "validation_failures": [
+            {"field": "diagnosis_codes", "rule": "icd10_lookup", "reason": "bad code"}
+        ],
+        "policy_answers": [],
+        "decision": "flagged",
+        "review_reasons": ["bad code"],
+        "error": None,
     }
     with patch("api.main.build_graph", return_value=mock_graph):
         with TestClient(app) as client:
             pdf_bytes = _make_pdf_bytes()
             response = client.post(
                 "/packages",
-                files=[("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))],
+                files=[
+                    ("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))
+                ],
             )
             package_id = response.json()["package_id"]
 
@@ -308,21 +441,43 @@ def test_submit_field_review():
     mock_graph = MagicMock()
     mock_graph.invoke.return_value = {
         "domain": "cms1500",
-        "documents": [{"path": "/tmp/claim.pdf", "doc_type": "cms1500", "has_text_layer": True, "scan_quality": None}],
-        "extraction_fields": [
-            {"name": "diagnosis_codes", "value": ["XXXXX"], "confidence": 0.5,
-             "grounded": True, "valid": False, "field_status": "found", "evidence": None},
+        "documents": [
+            {
+                "path": "/tmp/claim.pdf",
+                "doc_type": "cms1500",
+                "has_text_layer": True,
+                "scan_quality": None,
+            }
         ],
-        "extraction_status": "review", "extraction_overall_confidence": 0.5,
-        "validation_failures": [{"field": "diagnosis_codes", "rule": "icd10_lookup", "reason": "bad code"}],
-        "policy_answers": [], "decision": "flagged", "review_reasons": ["bad code"], "error": None,
+        "extraction_fields": [
+            {
+                "name": "diagnosis_codes",
+                "value": ["XXXXX"],
+                "confidence": 0.5,
+                "grounded": True,
+                "valid": False,
+                "field_status": "found",
+                "evidence": None,
+            },
+        ],
+        "extraction_status": "review",
+        "extraction_overall_confidence": 0.5,
+        "validation_failures": [
+            {"field": "diagnosis_codes", "rule": "icd10_lookup", "reason": "bad code"}
+        ],
+        "policy_answers": [],
+        "decision": "flagged",
+        "review_reasons": ["bad code"],
+        "error": None,
     }
     with patch("api.main.build_graph", return_value=mock_graph):
         with TestClient(app) as client:
             pdf_bytes = _make_pdf_bytes()
             response = client.post(
                 "/packages",
-                files=[("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))],
+                files=[
+                    ("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))
+                ],
             )
             package_id = response.json()["package_id"]
 
@@ -331,7 +486,12 @@ def test_submit_field_review():
 
             action_response = client.post(
                 f"/packages/{package_id}/fields/{field_id}/review",
-                json={"action": "edit", "corrected_value": ["J06.9"], "reviewer": "jane", "note": "fixed typo"},
+                json={
+                    "action": "edit",
+                    "corrected_value": ["J06.9"],
+                    "reviewer": "jane",
+                    "note": "fixed typo",
+                },
             )
 
     assert action_response.status_code == 200
@@ -341,13 +501,19 @@ def test_submit_field_review():
     session = db.SessionLocal()
     try:
         run = session.get(db.ExtractedField, field_id).extraction_run_id
-        assert session.query(db.ReviewAction).filter_by(extraction_run_id=run, field_name="diagnosis_codes").count() == 1
+        assert (
+            session.query(db.ReviewAction)
+            .filter_by(extraction_run_id=run, field_name="diagnosis_codes")
+            .count()
+            == 1
+        )
     finally:
         session.close()
 
 
 def test_field_review_404_for_wrong_package():
     from api.main import app
+
     with TestClient(app) as client:
         response = client.post(
             "/packages/wrong-package/fields/999999/review",
@@ -362,18 +528,35 @@ def test_validation_rerun():
     mock_graph = MagicMock()
     mock_graph.invoke.return_value = {
         "domain": "cms1500",
-        "documents": [{"path": "/tmp/claim.pdf", "doc_type": "cms1500", "has_text_layer": True, "scan_quality": None}],
+        "documents": [
+            {
+                "path": "/tmp/claim.pdf",
+                "doc_type": "cms1500",
+                "has_text_layer": True,
+                "scan_quality": None,
+            }
+        ],
         "extraction_data": {"diagnosis_codes": ["XXXXX"], "total_charge": 100.0},
-        "extraction_fields": [], "extraction_status": "review", "extraction_overall_confidence": 0.5,
-        "validation_failures": [], "policy_answers": [], "decision": "flagged", "review_reasons": [], "error": None,
+        "extraction_fields": [],
+        "extraction_status": "review",
+        "extraction_overall_confidence": 0.5,
+        "validation_failures": [],
+        "policy_answers": [],
+        "decision": "flagged",
+        "review_reasons": [],
+        "error": None,
     }
-    with patch("api.main.build_graph", return_value=mock_graph), \
-         patch("claimflow.review.rerun_validation", return_value=[]) as mock_rerun:
+    with (
+        patch("api.main.build_graph", return_value=mock_graph),
+        patch("claimflow.review.rerun_validation", return_value=[]) as mock_rerun,
+    ):
         with TestClient(app) as client:
             pdf_bytes = _make_pdf_bytes()
             response = client.post(
                 "/packages",
-                files=[("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))],
+                files=[
+                    ("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))
+                ],
             )
             package_id = response.json()["package_id"]
 
@@ -393,16 +576,27 @@ def test_rerun_validation_endpoint_persists_results():
 
     with patch("api.main.build_graph", return_value=MagicMock()):
         with TestClient(app) as client:
-            create = client.post("/packages", files={"files": ("a.pdf", b"%PDF-1.4", "application/pdf")})
+            create = client.post(
+                "/packages", files={"files": ("a.pdf", b"%PDF-1.4", "application/pdf")}
+            )
             package_id = create.json()["package_id"]
 
             session = db.SessionLocal()
-            db.update_package_status(session, package_id, "review_ready", result={
-                "domain": "cms1500", "extraction_data": {"patient_name": "DOE JOHN"},
-            })
+            db.update_package_status(
+                session,
+                package_id,
+                "review_ready",
+                result={
+                    "domain": "cms1500",
+                    "extraction_data": {"patient_name": "DOE JOHN"},
+                },
+            )
             session.close()
 
-            resp = client.post(f"/packages/{package_id}/validation/re-run", json={"corrected_fields": {"patient_name": "DOE JON"}})
+            resp = client.post(
+                f"/packages/{package_id}/validation/re-run",
+                json={"corrected_fields": {"patient_name": "DOE JON"}},
+            )
 
     assert resp.status_code == 200
     body = resp.json()
@@ -416,16 +610,25 @@ def test_submit_decision():
 
     mock_graph = MagicMock()
     mock_graph.invoke.return_value = {
-        "domain": None, "documents": [], "extraction_fields": [], "extraction_status": None,
-        "extraction_overall_confidence": None, "validation_failures": [], "policy_answers": [],
-        "decision": None, "review_reasons": [], "error": None,
+        "domain": None,
+        "documents": [],
+        "extraction_fields": [],
+        "extraction_status": None,
+        "extraction_overall_confidence": None,
+        "validation_failures": [],
+        "policy_answers": [],
+        "decision": None,
+        "review_reasons": [],
+        "error": None,
     }
     with patch("api.main.build_graph", return_value=mock_graph):
         with TestClient(app) as client:
             pdf_bytes = _make_pdf_bytes()
             response = client.post(
                 "/packages",
-                files=[("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))],
+                files=[
+                    ("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))
+                ],
             )
             package_id = response.json()["package_id"]
 
@@ -451,18 +654,39 @@ def test_policy_evidence_and_audit_endpoints():
     mock_graph = MagicMock()
     mock_graph.invoke.return_value = {
         "domain": "cms1500",
-        "documents": [{"path": "/tmp/claim.pdf", "doc_type": "cms1500", "has_text_layer": True, "scan_quality": None}],
-        "extraction_fields": [], "extraction_status": "review", "extraction_overall_confidence": 0.5,
-        "validation_failures": [{"field": "diagnosis_codes", "rule": "icd10_lookup", "reason": "bad code"}],
-        "policy_answers": [{"question": "Is XXXXX billable?", "answer": "No.", "citations": ["policy excerpt [1]"]}],
-        "decision": "flagged", "review_reasons": ["bad code"], "error": None,
+        "documents": [
+            {
+                "path": "/tmp/claim.pdf",
+                "doc_type": "cms1500",
+                "has_text_layer": True,
+                "scan_quality": None,
+            }
+        ],
+        "extraction_fields": [],
+        "extraction_status": "review",
+        "extraction_overall_confidence": 0.5,
+        "validation_failures": [
+            {"field": "diagnosis_codes", "rule": "icd10_lookup", "reason": "bad code"}
+        ],
+        "policy_answers": [
+            {
+                "question": "Is XXXXX billable?",
+                "answer": "No.",
+                "citations": ["policy excerpt [1]"],
+            }
+        ],
+        "decision": "flagged",
+        "review_reasons": ["bad code"],
+        "error": None,
     }
     with patch("api.main.build_graph", return_value=mock_graph):
         with TestClient(app) as client:
             pdf_bytes = _make_pdf_bytes()
             response = client.post(
                 "/packages",
-                files=[("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))],
+                files=[
+                    ("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))
+                ],
             )
             package_id = response.json()["package_id"]
 
@@ -486,6 +710,7 @@ def test_policy_evidence_and_audit_endpoints():
 
 def test_export_404_for_unknown_package():
     from api.main import app
+
     with TestClient(app) as client:
         response = client.get("/packages/does-not-exist/export")
     assert response.status_code == 404
@@ -498,17 +723,32 @@ def test_reclassify_document():
     mock_graph = MagicMock()
     mock_graph.invoke.return_value = {
         "domain": None,
-        "documents": [{"path": "/tmp/claim.pdf", "doc_type": "unknown", "has_text_layer": True,
-                        "scan_quality": None, "classification_reason": None}],
-        "extraction_fields": [], "extraction_status": None, "extraction_overall_confidence": None,
-        "validation_failures": [], "policy_answers": [], "decision": None, "review_reasons": [], "error": None,
+        "documents": [
+            {
+                "path": "/tmp/claim.pdf",
+                "doc_type": "unknown",
+                "has_text_layer": True,
+                "scan_quality": None,
+                "classification_reason": None,
+            }
+        ],
+        "extraction_fields": [],
+        "extraction_status": None,
+        "extraction_overall_confidence": None,
+        "validation_failures": [],
+        "policy_answers": [],
+        "decision": None,
+        "review_reasons": [],
+        "error": None,
     }
     with patch("api.main.build_graph", return_value=mock_graph):
         with TestClient(app) as client:
             pdf_bytes = _make_pdf_bytes()
             response = client.post(
                 "/packages",
-                files=[("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))],
+                files=[
+                    ("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))
+                ],
             )
             package_id = response.json()["package_id"]
 
@@ -537,6 +777,7 @@ def test_reclassify_document():
 
 def test_reclassify_document_404_for_wrong_package():
     from api.main import app
+
     with TestClient(app) as client:
         response = client.post(
             "/packages/wrong-package/documents/does-not-exist/reclassify",
@@ -547,22 +788,36 @@ def test_reclassify_document_404_for_wrong_package():
 
 def test_reprocess_passes_overrides_to_graph():
     from api.main import app
-    from claimflow import db
 
     mock_graph = MagicMock()
     mock_graph.invoke.return_value = {
         "domain": None,
-        "documents": [{"path": "/tmp/claim.pdf", "doc_type": "unknown", "has_text_layer": True,
-                        "scan_quality": None, "classification_reason": None}],
-        "extraction_fields": [], "extraction_status": None, "extraction_overall_confidence": None,
-        "validation_failures": [], "policy_answers": [], "decision": None, "review_reasons": [], "error": None,
+        "documents": [
+            {
+                "path": "/tmp/claim.pdf",
+                "doc_type": "unknown",
+                "has_text_layer": True,
+                "scan_quality": None,
+                "classification_reason": None,
+            }
+        ],
+        "extraction_fields": [],
+        "extraction_status": None,
+        "extraction_overall_confidence": None,
+        "validation_failures": [],
+        "policy_answers": [],
+        "decision": None,
+        "review_reasons": [],
+        "error": None,
     }
     with patch("api.main.build_graph", return_value=mock_graph):
         with TestClient(app) as client:
             pdf_bytes = _make_pdf_bytes()
             response = client.post(
                 "/packages",
-                files=[("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))],
+                files=[
+                    ("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))
+                ],
             )
             package_id = response.json()["package_id"]
 
@@ -586,34 +841,60 @@ def test_list_documents_includes_classification_metadata():
     mock_graph = MagicMock()
     mock_graph.invoke.return_value = {
         "domain": "cms1500",
-        "documents": [{"path": "/tmp/claim.pdf", "doc_type": "cms1500", "has_text_layer": True,
-                        "scan_quality": None, "classification_reason": "matched domain keyword 'cms-1500' for cms1500"}],
-        "extraction_fields": [], "extraction_status": "pass", "extraction_overall_confidence": 0.9,
-        "validation_failures": [], "policy_answers": [], "decision": "approved", "review_reasons": [], "error": None,
+        "documents": [
+            {
+                "path": "/tmp/claim.pdf",
+                "doc_type": "cms1500",
+                "has_text_layer": True,
+                "scan_quality": None,
+                "classification_reason": "matched domain keyword 'cms-1500' for cms1500",
+            }
+        ],
+        "extraction_fields": [],
+        "extraction_status": "pass",
+        "extraction_overall_confidence": 0.9,
+        "validation_failures": [],
+        "policy_answers": [],
+        "decision": "approved",
+        "review_reasons": [],
+        "error": None,
     }
     with patch("api.main.build_graph", return_value=mock_graph):
         with TestClient(app) as client:
             pdf_bytes = _make_pdf_bytes()
             response = client.post(
                 "/packages",
-                files=[("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))],
+                files=[
+                    ("files", ("claim.pdf", io.BytesIO(pdf_bytes), "application/pdf"))
+                ],
             )
             package_id = response.json()["package_id"]
 
             docs = client.get(f"/packages/{package_id}/documents").json()
 
-    assert docs[0]["classification_reason"] == "matched domain keyword 'cms-1500' for cms1500"
+    assert (
+        docs[0]["classification_reason"]
+        == "matched domain keyword 'cms-1500' for cms1500"
+    )
     assert docs[0]["manually_overridden"] is False
 
 
 def test_dashboard_summary_endpoint():
     from api.main import app
+
     with TestClient(app) as client:
         resp = client.get("/dashboard/summary")
 
     assert resp.status_code == 200
     body = resp.json()
     assert set(body.keys()) == {
-        "total_packages", "processing", "awaiting_review", "approved", "flagged",
-        "escalated", "processing_errors", "straight_through_rate", "top_validation_failures",
+        "total_packages",
+        "processing",
+        "awaiting_review",
+        "approved",
+        "flagged",
+        "escalated",
+        "processing_errors",
+        "straight_through_rate",
+        "top_validation_failures",
     }

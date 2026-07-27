@@ -350,3 +350,510 @@ per "do everything except for vlm and auth, which should be in todo" and
 production-hardening scope agreed earlier in the conversation. If new work
 comes in, start a fresh `## Session N+3` section rather than editing this
 one.
+
+## Session N+3: backend/frontend correctness review fixes (DONE — 2026-07-22)
+
+Reviewed the current FastAPI, LangGraph, SQLite, Streamlit, and Next.js code
+as one end-to-end workflow, then fixed every confirmed defect from that
+review without changing the established project structure or coding style.
+
+### Backend and persistence fixes
+
+- New uploads now atomically reserve `processing` before the background task
+  is scheduled. This closes the race where an immediate `POST .../process`
+  could start a second graph run while the first still appeared `queued`, and
+  makes restart recovery able to see an in-flight initial run.
+- `DocumentType` now covers every deep-extraction and classification-only
+  classifier output. Supporting documents such as `medical_bill`,
+  `damage_photo`, and `bank_statement` can no longer cause FastAPI response
+  validation failures, and the frontend reclassification menu exposes the
+  same complete set.
+- Package result documents are sanitized at both write and read boundaries.
+  New results store public `filename` metadata, and older result blobs that
+  still contain `path` are sanitized before `GET /packages/{id}` returns
+  them, so raw server filesystem paths are never exposed.
+- Validation reruns now merge the latest persisted scalar and nested-row
+  review actions with request corrections, preserve machine extraction,
+  supersede prior failures, persist the new failures/decision/review reasons,
+  and update the package result projection.
+- Reviewer decisions now update the result projection and lifecycle: final
+  approval moves a package to `completed`; flagged/escalated decisions keep
+  it in `review_ready`.
+- Export now reads the latest normalized extraction run, current failures,
+  latest decision, and latest review actions. Each field includes immutable
+  machine `value`, derived `final_value`, and reviewer metadata.
+- Streamlit now uses the same processing/review-ready/completed status
+  semantics and persists normalized extraction results instead of marking
+  every run completed.
+- The real/public download helper now imports optional `openpyxl` only inside
+  the HCPCS spreadsheet path, so the default backend test suite does not
+  require the eval extra.
+
+### Frontend and browser fixes
+
+- Field editing preserves value types: numbers remain numbers, booleans use a
+  boolean select, scalar lists require JSON arrays, and nested rows use typed
+  JSON objects. Invalid edits remain open and show an error instead of being
+  submitted as strings.
+- Nested list rows now support edit in addition to approve/reject, and prior
+  review actions can be revised instead of permanently hiding the controls.
+- Revalidation includes nested-row rejection semantics; the backend removes
+  the stable indexed row exactly once before applying deterministic rules.
+- The React 19 mobile hook now uses `useSyncExternalStore`, removing the
+  synchronous-effect state update and making frontend lint clean.
+- The browser smoke script discovers a package dynamically (or accepts
+  `CLAIMFLOW_PACKAGE_ID`), supports configurable frontend/API/screenshot
+  locations and read-only runs, and exits non-zero for captured browser
+  errors instead of only printing them.
+- OpenAPI TypeScript types were regenerated from the updated live FastAPI
+  schema. README endpoint count and upload status example were corrected.
+
+### Regression coverage and verification
+
+- Added coverage for classifier/enum parity, atomic initial processing,
+  sanitized result documents, scalar/nested review merging, typed numeric and
+  nested-row UI edits, rerun decision persistence, completed final approval,
+  and reviewed export values.
+- Backend: **193/193 pytest tests pass**.
+- Frontend: **28/28 Vitest tests pass**; ESLint clean.
+- Production frontend build and TypeScript check pass for all routes.
+- Ruff check/format pass on every Python file changed in this session.
+- Live read-only Playwright smoke against FastAPI `:8010` and Next.js `:3001`
+  passed dashboard, packages, reviews, upload, all five workspace tabs, and
+  settings with **zero console/page errors**. Screenshots: `/tmp/claimflow-screens`.
+
+No live LLM/OCR extraction or Qdrant retrieval was rerun in this session; the
+browser smoke used an existing processed package, while automated backend
+tests kept external model/retrieval behavior mocked as designed.
+
+## Session N+4: root CMS-1500 live backend evaluation (DONE — 2026-07-22)
+
+Used `CMS1500-1-791x1024.png` from the repository root as a real acceptance
+document and ran it through both the extraction nodes and the persisted FastAPI
+multipart upload/reprocessing workflow with the configured OpenRouter/Qwen model.
+
+### Defects found and fixed
+
+- Whole-page LightOn OCR classified the form correctly but omitted the dense Box
+  24 service table and repeated hallucinated lower-page headings. The first live
+  baseline therefore returned no service lines, missed the patient address, and
+  scored 0.777 confidence.
+- CMS-1500 image extraction now renders four overlapping proportional regions of
+  the standardized form and OCRs them concurrently. This preserves the full form
+  context while recovering the table layout; if regional OCR is unavailable, the
+  normal doc-intel source path remains the fallback.
+- Box 24 pipe-delimited OCR rows are aligned deterministically to the standard A-J
+  columns. This prevents EMG/modifier cells from being mistaken for diagnosis
+  pointers and keeps dates, CPT/HCPCS, charge, units, and rendering provider IDs
+  on the correct service row.
+- CMS two-digit dates are normalized to `MMDDYYYY`, Box 33a is selected instead of
+  33b, and the separate Box 17a qualifier is removed from the referring provider
+  name. Corrected values are synchronized into both extraction data and per-field
+  review rows.
+- Box 1a is optional in the extraction schema and the image leaves it blank, but
+  validation still treated it as mandatory. Removed that contradictory failure;
+  blank Box 1a now remains `null` without a false review reason.
+- The health extraction prompt now explicitly documents overlapping OCR regions
+  and the Box 1a, Box 17/17a, Box 24, and Box 33a mapping rules.
+
+### Live acceptance result
+
+- Uploaded through `POST /packages` and reprocessed through
+  `POST /packages/{id}/process`; persisted package:
+  `60f9a994-92b8-46da-b88a-a40ded180ddb`.
+- Exact comparison against the visible form: **27/27 top-level fields and 6/6
+  service rows**, with no missing, mismatched, or unexpected fields.
+- Correctly extracted the blank Box 1a, Salemy patient/insured identity and full
+  Knoxville address, all 12 diagnosis entries, all six Box 24 rows, $396.90 total,
+  $200.00 paid, Box 33 provider data, and signature date.
+- Final live confidence: **0.913**. Package status is correctly `review_ready` with
+  decision `flagged`: the synthetic source itself contains an invalid Box 33a NPI,
+  non-ICD diagnosis strings, and CPT `640`. It has 14 genuine validation failures,
+  no arithmetic mismatch, and no false blank-Box-1a failure.
+- Qdrant was not running locally, so secondary policy lookups returned “No relevant
+  policy document found.” This did not interrupt extraction, validation, decision,
+  persistence, or the acceptance comparison.
+
+### Verification
+
+- Focused CMS graph/schema/validation suite: **20/20 passed**.
+- Full backend suite: **196/196 passed** (three existing dependency warnings).
+- Ruff check passed for every Python file changed in this session.
+- Temporary FastAPI servers were stopped. The evaluated package remains in the
+  local SQLite database and upload storage for UI/API inspection.
+
+## Session N+5: complete CMS-1500 schema and image cross-check (DONE — 2026-07-23)
+
+Extended the canonical CMS-1500 schema to retain the useful populated values on
+the root acceptance image instead of limiting extraction to the original summary
+fields.
+
+### Schema and extraction fixes
+
+- Added complete patient/insured contact and relationship data, other-insurance
+  details, accident/condition flags, signatures and dates, Box 14-23 claim data,
+  tax-ID type, account/assignment values, complete Box 32/33 provider data, and the
+  correct Box 17 provider qualifier semantics.
+- Box 24 service rows now retain both dates, EMG, all four modifiers, diagnosis
+  pointer, charge, units, EPSDT/family-plan value, ID qualifier, and rendering ID.
+- Added Box 31 signer text and a semantically named physician signature date while
+  retaining `service_date` as a backward-compatible alias.
+- Corrected `xx` to `referring_provider_qualifier`; the printed `17a` form label is
+  no longer stored as an other-ID qualifier.
+- Provider names, complete multiline addresses, phone, signer, and signature date
+  are recovered deterministically from the standardized lower-page table.
+- Split the wide structured LLM response into two concurrent non-Box-24 passes.
+  Deterministic Box 24 rows are merged back and the complete result is rescored
+  against the canonical public schema and full OCR text. This avoids the configured
+  provider's effective completion cap without dropping public fields.
+- Fixed ClaimFlow-to-doc-intel runtime passthrough for provider, model, base URL,
+  API credentials, and output-token budget. Namespaced ClaimFlow settings prevent
+  doc-intel's own dotenv defaults from changing behavior based on import order.
+
+### Live acceptance result
+
+- Reprocessed package `60f9a994-92b8-46da-b88a-a40ded180ddb` through the real
+  FastAPI background workflow using `CMS1500-1-791x1024.png`.
+- Pixel-by-pixel/manual expected-value comparison: **75/75 scalar fields exact**
+  and **6/6 service rows exact across all 15 retained columns**.
+- Telephone values are `(877) 355-4141` for patient and insured and
+  `(800) 111-2222` for billing provider. Patient/insured ZIP is `37902`; service
+  facility ZIP is `88765`; billing provider ZIP is `66554`.
+- Final live confidence is **0.927**. Status is correctly `review_ready` and the
+  decision is `flagged` for the sample's 14 intentionally invalid synthetic
+  NPI/ICD/CPT values, not for extraction mismatch.
+
+### Verification
+
+- Focused settings/schema/graph suite: **18/18 passed**.
+- Full backend suite: **198/198 passed** (three existing dependency warnings).
+- Ruff passes on all changed Python files.
+
+## Session N+6: advertised import matrix and operator UI (DONE — 2026-07-23)
+
+Ran every advertised deep-extraction document type through the real FastAPI upload,
+background processing, persistence, validation, and review pipeline. This was a live
+model/OCR acceptance pass, not the mocked unit-test path.
+
+### Import results
+
+| Type / fixture | Live result |
+| --- | --- |
+| CMS-1500 root PNG | 75/75 scalar fields and 6/6 service rows × 15 columns exact; 0.927 confidence; 14 expected synthetic-code validation failures |
+| CMS sample EOB | All 15 canonical fields match the reference after printed redaction placeholders are normalized to `null`; 0.771 confidence |
+| Medicare Summary Notice route | Same CMS teaching document manually routed and reprocessed successfully; 0.810 confidence |
+| Generic loan application | 10/10 fields exact; 0.988 confidence; approved with zero failures |
+| SBA Form 413 | Correctly wins over generic SBA classification; 25/25 fields match the blank official form, including three AcroForm zero totals; zero failures |
+| SBA Form 2202 | Correctly classified; blank official form abstains with an empty liabilities list and `null` total; zero failures |
+| Florida declarations page | 15 populated policy fields; 0.981 confidence; approved with zero failures |
+| Empire Estimators Xactimate | All 57 numbered rows plus exact subtotal, overhead, profit, tax, RCV, depreciation, and ACV; 0.804 confidence; approved with zero failures |
+| HHH Roofing Xactimate summary | Correctly treats the scanned/redacted one-page summary as having no item table; exact RCV, depreciation, ACV, deductible, loss date, and loss type; zero failures |
+| Workflow Solutions Xactimate | All 12 numbered rows, separate per-line tax handling, exact subtotal/tax/RCV/zero depreciation/ACV, correct property address, and no fabricated loss date; zero failures |
+
+The blank/redacted SBA and Xactimate samples remain in review because their overall
+confidence is intentionally low, not because validation failed. That distinction is
+visible in both API output and the operator UI.
+
+### Fixes from the expanded matrix
+
+- Specific numbered SBA form classifiers now outrank the generic “Small Business
+  Administration” keyword match.
+- EOB placeholder strings are nulled consistently in both the canonical data and
+  per-field review projection; payer branding is no longer substituted for a missing
+  explicitly labeled payer.
+- Named SBA Form 413 PDF widgets are used as authoritative native evidence for the
+  form's zero-valued totals.
+- Xactimate scalar extraction runs page-locally while numbered estimate rows are
+  split into bounded model requests. Missing model rows are retried, then native
+  aligned PDF rows authoritatively restore line numbers and numeric values.
+- Both Xactimate table variants are supported: direct RCV columns and separate TAX +
+  RCV columns. For the latter, row totals correctly exclude tax so they reconcile to
+  the printed line-item subtotal.
+- Summary-only estimates no longer fail merely because the source does not include a
+  line-item page or because the insured/property was deliberately redacted.
+- Xactimate RCV validation now reconciles printed line subtotal + overhead + profit +
+  material sales tax. Depreciation/ACV are recovered from either explicit summary
+  labels or the final line-item totals row, and estimate-entry dates are not mistaken
+  for a date of loss.
+
+### UI verification
+
+- The package header, overview, queue, and per-field table display lifecycle status,
+  routing decision, confidence, validation counts, and low-confidence field counts.
+- A live Playwright browser pass against the 57-line Empire package showed Backend
+  online, Completed, Approved, 80% confidence, one document, zero failures, the PDF
+  viewer, and all review tabs.
+- Frontend verification: **28/28 Vitest tests passed**, ESLint passed, TypeScript
+  passed, and the Next.js production build completed for all routes.
+
+### Verification
+
+- Focused property/graph/domain suite: **52/52 passed**.
+- Full backend suite: **205/205 passed** (three dependency warnings).
+- Ruff passes across `src/claimflow`, `api`, and `tests`.
+
+## Session N+7: official CMS policy cross-check (DONE — 2026-07-23)
+
+Enabled and verified the secondary policy-evidence stage for the root CMS-1500
+acceptance package.
+
+### Corpus and retrieval fixes
+
+- Fixed `scripts/generate_policies.py`: after each `multi_cell`, FPDF left the
+  cursor at the right edge, so subsequent policy paragraphs were clipped to a
+  few characters. Regenerated all three complete demonstration PDFs.
+- Added two official CMS sources:
+  - Medicare Claims Processing Manual, Chapter 26, “Completing and Processing
+    Form CMS-1500 Data Set.”
+  - CMS “The National Provider Identifier” fact sheet.
+- Recorded authoritative URLs and the synthetic/official distinction in
+  `data/policies/SOURCES.md`.
+- Seed metadata now includes policy domain and authority. Qdrant contains
+  **579 chunks from five PDFs**: 551 official CMS chunks and 28 synthetic
+  demonstration chunks.
+- CMS-1500 retrieval filters to the health domain and `official_cms` authority;
+  synthetic demonstration policies cannot support CMS decisions.
+- Citations now include the actual source filename and a bounded source excerpt
+  instead of an unverifiable label such as `policy excerpt [1]`.
+- CMS policy explanations are deterministic rather than LLM-generated. This
+  removed blank/truncated answers and prevents invented code descriptions or
+  coverage conclusions. The response explicitly separates:
+  - policy/form requirements;
+  - code-registry membership validation; and
+  - payer-specific coverage, which this corpus cannot determine.
+- Reprocessing now replaces the package's prior policy-evidence rows, including
+  clearing them when a later run has no answers. The reporting endpoint no
+  longer accumulates duplicate evidence from historical runs.
+
+### Live CMS result
+
+- Reprocessed package `60f9a994-92b8-46da-b88a-a40ded180ddb` through the live
+  API with Qdrant enabled.
+- Extraction remains exact at **0.927 confidence** with the same 14 initial
+  NPI/ICD/CPT validator outputs. A later source audit (Session N+8) found that
+  these outputs are directionally correct but incomplete and must not yet be
+  treated as a production-grade CMS compliance result.
+- Policy stage produced **14/14 non-empty answers**, each with exactly one
+  official CMS citation.
+- Persisted `GET /packages/{id}/policy-evidence` returns exactly 14 current
+  entries, not accumulated history.
+- NPI evidence cites the CMS fact sheet's 10-digit numeric definition.
+- ICD evidence cites Chapter 26 Item 21 diagnosis-code/date-of-service
+  requirements while correctly identifying the code registry as the authority
+  for whether each particular code exists.
+- CPT/HCPCS evidence cites Chapter 26 Item 24D and explicitly states that the
+  manual does not contain the licensed current CPT set or establish
+  payer-specific coverage.
+
+### Verification
+
+- Focused retrieval/database/graph suite: **34/34 passed**.
+- Full backend suite: **210/210 passed** (three dependency warnings).
+- Ruff passes across the changed backend, tests, and policy scripts.
+- Qdrant remains running on port 6339 for UI testing.
+
+## Session N+8: CMS rule-source audit (RESEARCH COMPLETE — 2026-07-23)
+
+Re-checked the root CMS-1500 image, ClaimFlow's validators, and the live
+package result against official, date-appropriate CMS sources.
+
+### Confirmed conclusions
+
+- Box 33a is required for Medicare and must contain the billing provider/group
+  NPI. CMS defines an NPI as a 10-digit numeric identifier. The image visibly
+  contains `33-216649a`, so the billing-NPI rejection is correct.
+- The form's service dates are in February 2017. Medicare claims for services
+  on or after October 1, 2015 require ICD-10-CM, and the CMS-1500 02/12 ICD
+  indicator must therefore be `0`. The image contains `E`, which is invalid.
+- The A-L text printed to the left of Box 21 entries is the form's diagnosis
+  slot lettering. The image also visibly contains separate lowercase-prefixed
+  values (`a525.10` through `l585.56`); this is not an OCR merge. None of the
+  normalized values appears in CMS's official FY 2017 ICD-10-CM code file.
+- Chapter 26 says periods must not be entered in Box 21 diagnosis codes. Every
+  diagnosis value in the image contains a period.
+- Item 24D requires HCPCS. CPT codes are five numeric digits and HCPCS Level II
+  codes are one letter plus four digits. The submitted `640` is therefore not
+  valid as printed; the 2017 PFS contains the distinct five-digit code `00640`.
+
+### Gaps found in the implementation
+
+- The live result's 14 answers are not a complete CMS cross-check. ClaimFlow
+  fails to flag the invalid ICD indicator `E`, forbidden diagnosis periods,
+  and numeric Box 24E pointers (`1`-`6`) even though the 02/12 form requires
+  letters `A`-`L`.
+- Only Box 33a is NPI-validated. The visibly malformed NPIs in Boxes 17b, 24J,
+  and 32a are not checked, and the official NPI Luhn check digit is not
+  implemented.
+- `data/lookups/icd10.csv` contains the 2026 code set, not the FY 2017 code set
+  applicable to this claim. ICD membership validation must be date-versioned.
+- `data/lookups/cpt.csv` is explicitly a synthetic numeric-range placeholder,
+  not an authoritative CPT registry. It produces false confidence: `11478` is
+  accepted solely because it falls inside a generated range, although it is
+  absent from the January 2017 Medicare PFS file.
+- The January 2017 PFS lists `99444` with status `N` (non-covered by Medicare),
+  while the current validator silently accepts it and does not surface the
+  coverage result.
+- Further visible form issues are not checked, including malformed/unsupported
+  place-of-service values (`A33`, `44`), a reversed service date range on the
+  third line, and provider identifiers that are not valid NPIs.
+
+### Source set used
+
+- CMS Medicare Claims Processing Manual, Chapter 26.
+- CMS National Provider Identifier Standard and NPI check-digit specification.
+- CMS FY 2017 ICD-10-CM code descriptions.
+- CMS January 2017 Physician Fee Schedule relative value file.
+- CMS HCPCS overview and 2017 Alpha-Numeric HCPCS archive.
+
+No validator code was changed during this research-only audit.
+
+## Session N+9: other-case rule and evidence audit (RESEARCH COMPLETE — 2026-07-23)
+
+Applied the same source-level review to the other live/imported cases: CMS's
+sample EOB, the manually reclassified MSN route, the generic loan fixture, SBA
+Forms 413 and 2202, the three public Xactimate estimates, and the Florida sample
+declarations page.
+
+### Cross-cutting finding: non-CMS policy evidence is demonstrative only
+
+- Only `cms1500` retrieval filters to `authority=official_cms`. EOB/MSN,
+  Xactimate, declarations, generic loan, Form 413, and Form 2202 retrieval can
+  use the generated `health_policy.pdf`, `property_policy.pdf`, and
+  `loan_policy.pdf`.
+- Those three PDFs are synthetic demonstration text, not insurer contracts,
+  SBA rules, state insurance rules, or Verisk/Xactimate specifications.
+- Some synthetic statements are affirmatively wrong or too broad:
+  - `loan_policy.pdf` says SBA loans have a $5,000 minimum; SBA says the 7(a)
+    program has no universal minimum.
+  - `property_policy.pdf` says line-item sums must equal RCV, although legitimate
+    Xactimate estimates can apply sales tax, O&P, and additional charges.
+  - It also says negative line items are prohibited, while Xactimate explicitly
+    supports credit line items.
+  - It says every estimate requires line items, contradicting ClaimFlow's
+    intentional support for valid summary-only estimates.
+- Non-CMS policy answers remain LLM-synthesized, unlike the deterministic CMS
+  answers. They must be labeled as non-authoritative demo output or disabled
+  until official/customer-provided policy sources are installed.
+
+### EOB and Medicare Summary Notice
+
+- The CMS EOB fixture's totals and fields are extracted correctly. CMS confirms
+  an EOB is not a bill and the sample visibly says `THIS IS NOT A BILL`.
+- The live `medicare_summary_notice` package is not a true MSN fixture. It is
+  the same generic CMS EOB teaching PDF manually reclassified to test the route.
+  This proves override/reprocessing works, not MSN-specific extraction quality.
+- `is_bill=False` is source-backed. The remaining rules are mostly completeness
+  or anomaly heuristics, not formal adjudication:
+  - `provider_charges >= allowed_charges` is common and true in the sample, but
+    CMS only says the values may differ; the validator presents the inequality
+    too categorically.
+  - “claim number must contain a digit” is an extraction guard, not a published
+    universal identifier rule.
+  - `patient_name` being required is sensible for an operational review queue,
+    but the public sample deliberately redacts it; missing data does not make
+    the source document an invalid EOB.
+- Non-negative checks omit deductible, coinsurance, and copay. There is no
+  guarded reconciliation of patient responsibility to its components and no
+  CARC/RARC/remark-code reference validation.
+- The live package currently has one active validation failure but four
+  persisted policy-evidence rows, including duplicate/stale questions from
+  older runs. Future reprocessing uses replacement persistence, but existing
+  pre-fix rows were not migrated or cleaned.
+
+### Generic loan fixture
+
+- The live `application.pdf` is a generated “Horizon Community Bank” loan
+  request, not SBA Form 1919 and not evidence of SBA eligibility validation.
+- Its ten extracted fields match the fixture, so the extraction demo is sound.
+  The `approved` decision means only that the small structural validator passed;
+  it is not a lending, underwriting, SBA eligibility, or fraud decision.
+- The tax-ID rule only rejects alphabetic placeholders. It does not enforce the
+  IRS nine-digit EIN/SSN structures, much less verify an identifier.
+- Rejecting a business entity in `applicant_name` is tailored to this schema's
+  first owner row; official Form 1919 uses “Applicant” for the business itself.
+- `net_income <= gross_revenue` is a useful anomaly heuristic, not a universal
+  SBA eligibility rule. Other income/accounting presentation can require human
+  interpretation.
+- Signature detection accepts the printed text `Signature on File`; it has no
+  visual/cryptographic evidence that an authorized representative actually
+  signed.
+
+### SBA Form 413
+
+- The official blank form is correctly escalated for low confidence and is not
+  falsely approved. Its three zero totals are real AcroForm defaults.
+- The arithmetic identity `assets - liabilities = net worth` is valid.
+- Important official form rules/fields are missing:
+  - statement recency: within 90 days for Disaster or 120 days for the other
+    listed SBA programs (the validator only rejects future dates);
+  - required certification/signature/date and possible spouse signature;
+  - sum of asset components to total assets and liability components to total
+    liabilities;
+  - `other_assets` and the form's separate income categories.
+- The schema's single `annual_income` field does not correspond to the current
+  form's separate salary, investment, real-estate, and other-income fields.
+
+### SBA Form 2202
+
+- The official blank form is correctly escalated for low confidence.
+- The implemented schema is materially incomplete: it omits applicant name,
+  schedule date, signature, and signer title.
+- It introduces `total_current_balance`, although the published Form 2202 does
+  not print that total field.
+- The official instruction is that the schedule supplements the balance sheet
+  and should balance to liabilities on that form. ClaimFlow does not extract
+  or merge the balance sheet here, so the central official reconciliation is
+  not implemented.
+- `current_balance > original_amount` can be a useful review signal but is not
+  universally invalid; capitalized interest, fees, or modified debt can produce
+  that state beyond the code's narrow revolving/deferred exceptions.
+
+### Xactimate estimates
+
+- The three public estimate fixtures are currently extracted accurately and
+  their printed arithmetic reconciles:
+  - Empire: 57 rows sum to `$38,707.98`; plus O&P and tax equals RCV
+    `$48,151.75`; RCV less depreciation equals ACV `$45,900.18`.
+  - HHH summary: subtotal plus tax equals RCV `$26,360.08`; RCV less
+    depreciation equals gross ACV `$14,251.64`.
+  - Workflow Solutions: 12 rows sum to `$21,317.55`; plus tax equals RCV
+    `$21,997.14`; depreciation is zero.
+- These are document-arithmetic checks, not coverage decisions. No carrier
+  policy is loaded and no covered-peril determination is made.
+- The hard-coded `subtotal + overhead + profit + tax = RCV` model is not
+  universal. Verisk supports additional charges, multiple tax/O&P application
+  modes, cumulative O&P, and line-level O&P.
+- The validator does not directly check each row's quantity × unit cost despite
+  the schema describing that identity.
+- HHH's source separately reports a net ACV payment after deductible. ClaimFlow
+  stores gross ACV and deductible but has no `net_acv_payment` field, leaving a
+  real semantic ambiguity hidden from the UI.
+
+### Declarations page
+
+- All 15 implemented fields match the Florida CFO sample, so the extraction
+  case itself is strong.
+- The schema loses useful policy meaning: the hurricane deductible is printed
+  as `2% of Coverage A` and `$3,200`, but ClaimFlow retains only `$3,200`.
+- It omits the policy form, insured-property address as a distinct field,
+  Coverage E/F, optional coverages, endorsements, discounts/surcharges, and
+  policy fees.
+- The date-of-loss/policy-period and property-address consistency rules exist
+  only for a pre-merged dictionary. The production pipeline does not merge an
+  estimate with a declarations page, so those advertised cross-document checks
+  do not execute in a normal package.
+
+### Real/public evaluation scope
+
+- The structured CMS SynPUF, FEMA IHP, SBA 7(a), and PPP scripts perform
+  dataset-specific sanity checks. Except for a small NPI helper reuse, they do
+  not run the corresponding production document validators.
+- Their 100% rates show that sampled public rows satisfy those independent
+  checks; they do not prove that CMS-1500, Xactimate, or loan validation rules
+  are complete or authoritative.
+- The real extraction fixtures remain valuable evidence for extraction and
+  abstention behavior, but should not be described as regulatory compliance or
+  end-to-end claim adjudication.
+
+No validator, schema, persistence, or UI code was changed during this
+research-only audit.

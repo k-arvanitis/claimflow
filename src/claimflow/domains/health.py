@@ -16,17 +16,41 @@ from claimflow.state import ValidationFailure
 class ServiceLine(BaseExtraction):
     cpt_code: str = Field(description="CPT procedure code (5 digits)")
     date_of_service: str = Field(description="Date of service MMDDYYYY")
+    service_to_date: str | None = Field(
+        default=None, description="End date of service MMDDYYYY (Box 24A)"
+    )
     place_of_service: str = Field(description="2-digit place of service code")
-    diagnosis_pointer: str = Field(description="Diagnosis code pointer(s): A, B, C, D")
+    emergency_indicator: str | None = Field(
+        default=None, description="Emergency indicator printed in Box 24C"
+    )
+    diagnosis_pointer: str = Field(
+        description="Box 24E diagnosis pointer(s), extracted verbatim"
+    )
     charges: float = Field(description="Dollar amount charged for this line")
     units: int = Field(description="Number of units/days")
     modifier: str | None = Field(default=None, description="CPT modifier code")
-    rendering_provider_npi: str | None = Field(default=None, description="Rendering provider NPI if different from billing")  # noqa: E501
+    modifier_2: str | None = Field(default=None, description="Second CPT modifier")
+    modifier_3: str | None = Field(default=None, description="Third CPT modifier")
+    modifier_4: str | None = Field(default=None, description="Fourth CPT modifier")
+    epsdt_family_plan: str | None = Field(
+        default=None, description="EPSDT/family-plan indicator (Box 24H)"
+    )
+    rendering_provider_id_qualifier: str | None = Field(
+        default=None, description="Rendering provider ID qualifier (Box 24I)"
+    )
+    rendering_provider_npi: str | None = Field(
+        default=None, description="Rendering provider NPI if different from billing"
+    )  # noqa: E501
 
 
 class CMS1500(BaseExtraction):
+    insurance_program: str | None = Field(
+        default=None,
+        description="Checked insurance program in Box 1, e.g. Medicare or Medicaid",
+    )
     insurance_id: str | None = Field(
-        default=None, description="Insured's ID number (Box 1a); null if the box is blank",
+        default=None,
+        description="Insured's ID number (Box 1a); null if the box is blank",
     )
     patient_name: str = Field(description="Patient last name, first name (Box 2)")
     patient_dob: str = Field(description="Patient date of birth MMDDYYYY (Box 3)")
@@ -39,26 +63,186 @@ class CMS1500(BaseExtraction):
     )
     patient_city: str | None = Field(default=None, description="Patient city (Box 5)")
     patient_state: str | None = Field(default=None, description="Patient state (Box 5)")
-    patient_zip: str | None = Field(default=None, description="Patient ZIP code (Box 5)")
+    patient_zip: str | None = Field(
+        default=None, description="Patient ZIP code (Box 5)"
+    )
+    patient_phone: str | None = Field(
+        default=None, description="Patient telephone including area code (Box 5)"
+    )
+    patient_relationship_to_insured: str | None = Field(
+        default=None, description="Checked relationship in Box 6"
+    )
     insured_name: str = Field(description="Insured's name (Box 4)")
-    insured_id: str | None = Field(default=None, description="Insured's policy/group number (Box 11)")
-    date_of_current_illness: str | None = Field(default=None, description="Date of current illness MMDDYYYY (Box 14)")
-    referring_provider_name: str | None = Field(default=None, description="Referring provider name (Box 17)")
-    referring_provider_npi: str | None = Field(default=None, description="Referring provider NPI (Box 17b)")
-    hospitalization_from: str | None = Field(default=None, description="Hospitalization from date MMDDYYYY (Box 18)")
-    hospitalization_to: str | None = Field(default=None, description="Hospitalization to date MMDDYYYY (Box 18)")
-    diagnosis_codes: list[str] = Field(description="ICD-10-CM diagnosis codes A through L (Box 21)")
+    insured_address: str | None = Field(
+        default=None, description="Insured street address (Box 7)"
+    )
+    insured_city: str | None = Field(default=None, description="Insured city (Box 7)")
+    insured_state: str | None = Field(default=None, description="Insured state (Box 7)")
+    insured_zip: str | None = Field(default=None, description="Insured ZIP code (Box 7)")
+    insured_phone: str | None = Field(
+        default=None, description="Insured telephone including area code (Box 7)"
+    )
+    other_insured_name: str | None = Field(
+        default=None, description="Other insured name (Box 9)"
+    )
+    other_insured_policy_number: str | None = Field(
+        default=None, description="Other insured policy/group number (Box 9a)"
+    )
+    other_insured_plan_name: str | None = Field(
+        default=None, description="Other insured plan/program name (Box 9d)"
+    )
+    condition_related_to_employment: bool | None = Field(
+        default=None, description="Employment-related condition YES/NO (Box 10a)"
+    )
+    condition_related_to_auto_accident: bool | None = Field(
+        default=None, description="Auto-accident-related condition YES/NO (Box 10b)"
+    )
+    auto_accident_state: str | None = Field(
+        default=None, description="Auto accident state (Box 10b)"
+    )
+    condition_related_to_other_accident: bool | None = Field(
+        default=None, description="Other-accident-related condition YES/NO (Box 10c)"
+    )
+    claim_codes: str | None = Field(
+        default=None, description="Claim codes designated by NUCC (Box 10d)"
+    )
+    insured_id: str | None = Field(
+        default=None, description="Insured's policy/group number (Box 11)"
+    )
+    insured_dob: str | None = Field(
+        default=None, description="Insured date of birth MMDDYYYY (Box 11a)"
+    )
+    insured_sex: str | None = Field(default=None, description="Insured sex M or F (Box 11a)")
+    other_claim_id_qualifier: str | None = Field(
+        default=None, description="Other claim ID qualifier (Box 11b)"
+    )
+    other_claim_id: str | None = Field(
+        default=None, description="Other claim ID (Box 11b)"
+    )
+    insurance_plan_name: str | None = Field(
+        default=None, description="Insurance plan/program name (Box 11c)"
+    )
+    has_other_health_benefit_plan: bool | None = Field(
+        default=None, description="Another health benefit plan YES/NO (Box 11d)"
+    )
+    patient_signature_on_file: bool | None = Field(
+        default=None, description="Patient/authorized signature present (Box 12)"
+    )
+    patient_signature_date: str | None = Field(
+        default=None, description="Patient signature date MMDDYYYY (Box 12)"
+    )
+    insured_signature_on_file: bool | None = Field(
+        default=None, description="Insured/authorized signature present (Box 13)"
+    )
+    date_of_current_illness: str | None = Field(
+        default=None, description="Date of current illness MMDDYYYY (Box 14)"
+    )
+    date_of_current_illness_qualifier: str | None = Field(
+        default=None, description="Date qualifier printed in Box 14"
+    )
+    other_date: str | None = Field(
+        default=None, description="Other date MMDDYYYY (Box 15)"
+    )
+    other_date_qualifier: str | None = Field(
+        default=None, description="Other date qualifier (Box 15)"
+    )
+    unable_to_work_from: str | None = Field(
+        default=None, description="Unable-to-work start date MMDDYYYY (Box 16)"
+    )
+    unable_to_work_to: str | None = Field(
+        default=None, description="Unable-to-work end date MMDDYYYY (Box 16)"
+    )
+    referring_provider_qualifier: str | None = Field(
+        default=None,
+        description="Two-character referring/ordering/supervising provider qualifier in Box 17",
+    )
+    referring_provider_name: str | None = Field(
+        default=None, description="Referring provider name (Box 17)"
+    )
+    referring_provider_npi: str | None = Field(
+        default=None, description="Referring provider NPI (Box 17b)"
+    )
+    referring_provider_other_id_qualifier: str | None = Field(
+        default=None, description="Referring provider other-ID qualifier (Box 17a)"
+    )
+    referring_provider_other_id: str | None = Field(
+        default=None, description="Referring provider other ID (Box 17a)"
+    )
+    hospitalization_from: str | None = Field(
+        default=None, description="Hospitalization from date MMDDYYYY (Box 18)"
+    )
+    hospitalization_to: str | None = Field(
+        default=None, description="Hospitalization to date MMDDYYYY (Box 18)"
+    )
+    additional_claim_information: str | None = Field(
+        default=None, description="Additional claim information (Box 19)"
+    )
+    outside_lab: bool | None = Field(
+        default=None, description="Outside laboratory YES/NO (Box 20)"
+    )
+    outside_lab_charges: float | None = Field(
+        default=None, description="Outside laboratory charges (Box 20)"
+    )
+    diagnosis_codes: list[str] = Field(
+        description="ICD-10-CM diagnosis codes A through L (Box 21)"
+    )
+    diagnosis_code_indicator: str | None = Field(
+        default=None, description="ICD indicator printed in Box 21"
+    )
+    resubmission_code: str | None = Field(
+        default=None, description="Resubmission code (Box 22)"
+    )
+    original_reference_number: str | None = Field(
+        default=None, description="Original reference number (Box 22)"
+    )
+    prior_authorization_number: str | None = Field(
+        default=None, description="Prior authorization number (Box 23)"
+    )
     service_lines: list[ServiceLine] = Field(description="Service line items (Box 24)")
     federal_tax_id: str = Field(description="Federal tax ID (Box 25)")
-    patient_account_number: str | None = Field(default=None, description="Patient account number (Box 26)")
+    federal_tax_id_type: str | None = Field(
+        default=None, description="Checked SSN or EIN tax-ID type (Box 25)"
+    )
+    patient_account_number: str | None = Field(
+        default=None, description="Patient account number (Box 26)"
+    )
     accept_assignment: bool = Field(description="Accept assignment YES/NO (Box 27)")
     total_charge: float = Field(description="Total charge (Box 28)")
     amount_paid: float = Field(description="Amount paid (Box 29)")
+    service_facility_name: str | None = Field(
+        default=None, description="Service facility name (Box 32)"
+    )
+    service_facility_address: str | None = Field(
+        default=None, description="Complete service facility address (Box 32)"
+    )
+    service_facility_npi: str | None = Field(
+        default=None, description="Service facility identifier in Box 32a"
+    )
+    service_facility_other_id: str | None = Field(
+        default=None, description="Service facility identifier in Box 32b"
+    )
     billing_provider_name: str = Field(description="Billing provider name (Box 33)")
+    billing_provider_phone: str | None = Field(
+        default=None, description="Billing provider telephone (Box 33)"
+    )
     billing_provider_npi: str = Field(description="Billing provider NPI (Box 33a)")
-    billing_provider_address: str = Field(description="Billing provider address (Box 33)")
+    billing_provider_other_id: str | None = Field(
+        default=None, description="Billing provider identifier in Box 33b"
+    )
+    billing_provider_address: str = Field(
+        description="Billing provider address (Box 33)"
+    )
     signature_on_file: bool = Field(description="Physician signature on file (Box 31)")
-    service_date: str | None = Field(default=None, description="Service date on signature line MMDDYYYY (Box 31)")
+    physician_signature_name: str | None = Field(
+        default=None, description="Physician or supplier signature/name in Box 31"
+    )
+    physician_signature_date: str | None = Field(
+        default=None, description="Physician or supplier signature date MMDDYYYY (Box 31)"
+    )
+    service_date: str | None = Field(
+        default=None,
+        description="Legacy alias for the physician signature date MMDDYYYY (Box 31)",
+    )
 
 
 _SPEC = SchemaSpec(
@@ -68,8 +252,12 @@ _SPEC = SchemaSpec(
 )
 
 _MANDATORY = [
-    "insurance_id", "patient_name", "patient_dob",
-    "billing_provider_npi", "diagnosis_codes", "service_lines", "total_charge",
+    "patient_name",
+    "patient_dob",
+    "billing_provider_npi",
+    "diagnosis_codes",
+    "service_lines",
+    "total_charge",
 ]
 
 
@@ -96,8 +284,13 @@ def _validate(data: dict) -> list[ValidationFailure]:
     for field in _MANDATORY:
         val = data.get(field)
         if not val and val != 0:
-            failures.append(ValidationFailure(field=field, rule="mandatory",
-                reason=f"{field} is required but missing or empty"))
+            failures.append(
+                ValidationFailure(
+                    field=field,
+                    rule="mandatory",
+                    reason=f"{field} is required but missing or empty",
+                )
+            )
 
     # A real NPI is always exactly 10 digits. Models asked to extract a blank NPI field
     # sometimes fabricate a plausible-looking number instead of returning empty — catch
@@ -107,53 +300,124 @@ def _validate(data: dict) -> list[ValidationFailure]:
     # here — verifying it correctly needs a confirmed reference example, not memory.)
     npi = data.get("billing_provider_npi")
     if npi and (not re.fullmatch(r"\d{10}", str(npi)) or _looks_fabricated(str(npi))):
-        failures.append(ValidationFailure(field="billing_provider_npi", rule="mandatory",
-            reason=f"'{npi}' does not look like a real NPI — treating as missing"))
+        failures.append(
+            ValidationFailure(
+                field="billing_provider_npi",
+                rule="mandatory",
+                reason=f"'{npi}' does not look like a real NPI — treating as missing",
+            )
+        )
 
     for code in data.get("diagnosis_codes") or []:
         if code and not _icd10.is_valid_icd10(code):
-            failures.append(ValidationFailure(field="diagnosis_codes", rule="icd10_lookup",
-                reason=f"'{code}' is not a recognized ICD-10-CM code"))
+            failures.append(
+                ValidationFailure(
+                    field="diagnosis_codes",
+                    rule="icd10_lookup",
+                    reason=f"'{code}' is not a recognized ICD-10-CM code",
+                )
+            )
 
     lines = data.get("service_lines") or []
 
     for line in lines:
         cpt = line.get("cpt_code", "")
         if cpt and not _cpt.is_valid_cpt(cpt):
-            failures.append(ValidationFailure(field="service_lines", rule="cpt_lookup",
-                reason=f"CPT '{cpt}' is not a recognized procedure code"))
+            failures.append(
+                ValidationFailure(
+                    field="service_lines",
+                    rule="cpt_lookup",
+                    reason=f"CPT '{cpt}' is not a recognized procedure code",
+                )
+            )
 
     try:
         computed = sum(Decimal(str(line.get("charges", "0"))) for line in lines)
         total = Decimal(str(data.get("total_charge", "0")))
         if abs(computed - total) > Decimal("0.01"):
-            failures.append(ValidationFailure(field="total_charge", rule="arithmetic",
-                reason=f"Line sum ${computed} does not match total charge ${total}"))
+            failures.append(
+                ValidationFailure(
+                    field="total_charge",
+                    rule="arithmetic",
+                    reason=f"Line sum ${computed} does not match total charge ${total}",
+                )
+            )
     except InvalidOperation:
-        failures.append(ValidationFailure(field="total_charge", rule="arithmetic",
-            reason="Could not parse charge amounts as decimal numbers"))
+        failures.append(
+            ValidationFailure(
+                field="total_charge",
+                rule="arithmetic",
+                reason="Could not parse charge amounts as decimal numbers",
+            )
+        )
 
     today = date.today()
     for line in lines:
         dos = _parse_date(line.get("date_of_service", ""))
         if dos and dos > today:
-            failures.append(ValidationFailure(field="service_lines", rule="date_window",
-                reason=f"Date of service {line['date_of_service']} is in the future"))
+            failures.append(
+                ValidationFailure(
+                    field="service_lines",
+                    rule="date_window",
+                    reason=f"Date of service {line['date_of_service']} is in the future",
+                )
+            )
 
     return failures
 
 
 _SUPPORTING_TYPES = {
-    "medical_bill": {"statement of charges", "patient balance", "amount due", "billing statement"},
-    "insurance_policy": {"policy number", "summary of benefits", "coverage period", "certificate of insurance"},
-    "denial_letter": {"claim denied", "denial of coverage", "notice of denial", "adverse determination"},
-    "clinical_note": {"chief complaint", "assessment and plan", "progress note", "history of present illness"},
-    "lab_report": {"lab report", "laboratory results", "reference range", "specimen collected"},
-    "discharge_summary": {"discharge summary", "discharge diagnosis", "discharge instructions"},
-    "referral_letter": {"referral letter", "referring you to", "please see this patient"},
+    "medical_bill": {
+        "statement of charges",
+        "patient balance",
+        "amount due",
+        "billing statement",
+    },
+    "insurance_policy": {
+        "policy number",
+        "summary of benefits",
+        "coverage period",
+        "certificate of insurance",
+    },
+    "denial_letter": {
+        "claim denied",
+        "denial of coverage",
+        "notice of denial",
+        "adverse determination",
+    },
+    "clinical_note": {
+        "chief complaint",
+        "assessment and plan",
+        "progress note",
+        "history of present illness",
+    },
+    "lab_report": {
+        "lab report",
+        "laboratory results",
+        "reference range",
+        "specimen collected",
+    },
+    "discharge_summary": {
+        "discharge summary",
+        "discharge diagnosis",
+        "discharge instructions",
+    },
+    "referral_letter": {
+        "referral letter",
+        "referring you to",
+        "please see this patient",
+    },
     # Classification-only — recognized and routed for manual triage, no extraction pipeline.
-    "prior_authorization_letter": {"prior authorization", "preauthorization", "precertification"},
-    "eligibility_benefits_verification": {"eligibility verification", "benefits verification", "coverage verification"},
+    "prior_authorization_letter": {
+        "prior authorization",
+        "preauthorization",
+        "precertification",
+    },
+    "eligibility_benefits_verification": {
+        "eligibility verification",
+        "benefits verification",
+        "coverage verification",
+    },
     # UB-04/CMS-1450: classified only. Full production support needs licensed NUBC/AHA
     # data specs, not shipped here — see README known limitations.
     "ub04_cms1450": {"ub-04", "cms-1450", "uniform billing"},
@@ -171,21 +435,49 @@ register(HEALTH)
 
 
 class EOB(BaseExtraction):
-    payer_name: str | None = Field(default=None, description="Insurer/Medicare name issuing this notice")
+    payer_name: str | None = Field(
+        default=None, description="Insurer/Medicare name issuing this notice"
+    )
     patient_name: str = Field(description="Patient name")
-    provider_name: str | None = Field(default=None, description="Rendering provider/facility name")
-    claim_number: str | None = Field(default=None, description="Claim number; null if the field is blank")
-    service_date: str | None = Field(default=None, description="Date of service MMDDYYYY")
-    service_description: str | None = Field(default=None, description="Service/procedure description")
-    provider_charges: float | None = Field(default=None, description="Amount the provider billed")
-    allowed_charges: float | None = Field(default=None, description="Payer's approved amount")
-    plan_paid: float | None = Field(default=None, description="Amount paid by the insurer/Medicare")
-    patient_responsibility: float | None = Field(default=None, description="Amount owed by the patient")
-    deductible_amount: float | None = Field(default=None, description="Deductible portion applied")
-    coinsurance_amount: float | None = Field(default=None, description="Coinsurance portion applied")
-    copay_amount: float | None = Field(default=None, description="Copay portion applied")
-    denial_or_remark_codes: list[str] = Field(default_factory=list, description="Remark/denial codes (e.g. CO-45)")
-    is_bill: bool = Field(description="True only if the document presents itself as a bill requiring payment")
+    provider_name: str | None = Field(
+        default=None, description="Rendering provider/facility name"
+    )
+    claim_number: str | None = Field(
+        default=None, description="Claim number; null if the field is blank"
+    )
+    service_date: str | None = Field(
+        default=None, description="Date of service MMDDYYYY"
+    )
+    service_description: str | None = Field(
+        default=None, description="Service/procedure description"
+    )
+    provider_charges: float | None = Field(
+        default=None, description="Amount the provider billed"
+    )
+    allowed_charges: float | None = Field(
+        default=None, description="Payer's approved amount"
+    )
+    plan_paid: float | None = Field(
+        default=None, description="Amount paid by the insurer/Medicare"
+    )
+    patient_responsibility: float | None = Field(
+        default=None, description="Amount owed by the patient"
+    )
+    deductible_amount: float | None = Field(
+        default=None, description="Deductible portion applied"
+    )
+    coinsurance_amount: float | None = Field(
+        default=None, description="Coinsurance portion applied"
+    )
+    copay_amount: float | None = Field(
+        default=None, description="Copay portion applied"
+    )
+    denial_or_remark_codes: list[str] = Field(
+        default_factory=list, description="Remark/denial codes (e.g. CO-45)"
+    )
+    is_bill: bool = Field(
+        description="True only if the document presents itself as a bill requiring payment"
+    )
 
 
 _EOB_SPEC = SchemaSpec(
@@ -203,49 +495,92 @@ def _validate_eob(data: dict) -> list[ValidationFailure]:
     for field in _EOB_MANDATORY:
         val = data.get(field)
         if val is None or (isinstance(val, str) and not val.strip()):
-            failures.append(ValidationFailure(field=field, rule="mandatory",
-                reason=f"{field} is required but missing or empty"))
+            failures.append(
+                ValidationFailure(
+                    field=field,
+                    rule="mandatory",
+                    reason=f"{field} is required but missing or empty",
+                )
+            )
 
     # An EOB/MSN is informational by design ("This is not a bill" is standard boilerplate);
     # is_bill=True on this document type is itself the anomaly worth flagging.
     if data.get("is_bill") is True:
-        failures.append(ValidationFailure(field="is_bill", rule="not_a_bill",
-            reason="EOB/MSN documents are informational, not bills — is_bill=True is unexpected"))
+        failures.append(
+            ValidationFailure(
+                field="is_bill",
+                rule="not_a_bill",
+                reason="EOB/MSN documents are informational, not bills — is_bill=True is unexpected",
+            )
+        )
 
-    for field in ("provider_charges", "allowed_charges", "plan_paid", "patient_responsibility"):
+    for field in (
+        "provider_charges",
+        "allowed_charges",
+        "plan_paid",
+        "patient_responsibility",
+    ):
         val = data.get(field)
         try:
             if val is not None and float(val) < 0:
-                failures.append(ValidationFailure(field=field, rule="negative_amount",
-                    reason=f"{field} cannot be negative"))
+                failures.append(
+                    ValidationFailure(
+                        field=field,
+                        rule="negative_amount",
+                        reason=f"{field} cannot be negative",
+                    )
+                )
         except (TypeError, ValueError):
             pass
 
-    provider_charges, allowed_charges = data.get("provider_charges"), data.get("allowed_charges")
+    provider_charges, allowed_charges = (
+        data.get("provider_charges"),
+        data.get("allowed_charges"),
+    )
     if provider_charges is not None and allowed_charges is not None:
         try:
             if float(provider_charges) < float(allowed_charges):
-                failures.append(ValidationFailure(field="provider_charges", rule="amount_consistency",
-                    reason=f"provider_charges ${provider_charges} is less than allowed_charges ${allowed_charges}"))
+                failures.append(
+                    ValidationFailure(
+                        field="provider_charges",
+                        rule="amount_consistency",
+                        reason=f"provider_charges ${provider_charges} is less than allowed_charges ${allowed_charges}",
+                    )
+                )
         except (TypeError, ValueError):
             pass
 
     claim_number = data.get("claim_number")
     if claim_number and not re.search(r"\d", str(claim_number)):
-        failures.append(ValidationFailure(field="claim_number", rule="mandatory",
-            reason=f"'{claim_number}' has no digits — looks like a placeholder, not a claim number"))
+        failures.append(
+            ValidationFailure(
+                field="claim_number",
+                rule="mandatory",
+                reason=f"'{claim_number}' has no digits — looks like a placeholder, not a claim number",
+            )
+        )
 
     service_date = _parse_date(data.get("service_date") or "")
     if service_date and service_date > date.today():
-        failures.append(ValidationFailure(field="service_date", rule="date_window",
-            reason="Service date is in the future"))
+        failures.append(
+            ValidationFailure(
+                field="service_date",
+                rule="date_window",
+                reason="Service date is in the future",
+            )
+        )
 
     return failures
 
 
 EOB_DOMAIN = Domain(
     doc_type="eob",
-    keywords={"explanation of benefits", "eob", "this is not a bill", "amount you may be billed"},
+    keywords={
+        "explanation of benefits",
+        "eob",
+        "this is not a bill",
+        "amount you may be billed",
+    },
     spec=_EOB_SPEC,
     validate=_validate_eob,
 )
@@ -257,7 +592,9 @@ register(EOB_DOMAIN)
 MEDICARE_SUMMARY_NOTICE = Domain(
     doc_type="medicare_summary_notice",
     keywords={"medicare summary notice", "msn"},
-    spec=SchemaSpec(name="medicare_summary_notice", model=EOB, system_prompt=_EOB_PROMPT),
+    spec=SchemaSpec(
+        name="medicare_summary_notice", model=EOB, system_prompt=_EOB_PROMPT
+    ),
     validate=_validate_eob,
 )
 register(MEDICARE_SUMMARY_NOTICE)

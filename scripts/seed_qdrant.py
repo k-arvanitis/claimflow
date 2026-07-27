@@ -3,6 +3,7 @@
 Usage: uv run python scripts/seed_qdrant.py --policies data/policies/
 Requires: Qdrant running (docker compose up -d qdrant)
 """
+
 import argparse
 from pathlib import Path
 
@@ -12,6 +13,17 @@ from qdrant_client import QdrantClient
 from claimflow.config import settings
 
 CHUNK_SIZE = 400  # characters
+
+
+def _policy_domain(pdf_path: Path) -> str:
+    name = pdf_path.name.lower()
+    if name.startswith(("health_", "cms_", "medicare_")):
+        return "health"
+    if name.startswith("property_"):
+        return "property"
+    if name.startswith(("loan_", "sba_")):
+        return "loan"
+    return "unknown"
 
 
 def _extract_text(pdf_path: Path) -> str:
@@ -55,12 +67,31 @@ def main() -> None:
     all_chunks = []
     for pdf in pdfs:
         text = _extract_text(pdf)
-        all_chunks.extend(_chunk(text, pdf.name))
+        domain = _policy_domain(pdf)
+        all_chunks.extend(
+            {
+                **chunk,
+                "domain": domain,
+                "authority": (
+                    "official_cms"
+                    if pdf.name.lower().startswith("cms_")
+                    else "synthetic"
+                ),
+            }
+            for chunk in _chunk(text, pdf.name)
+        )
 
     client.add(
         collection_name=settings.qdrant_collection,
         documents=[c["text"] for c in all_chunks],
-        metadata=[{"source": c["source"]} for c in all_chunks],
+        metadata=[
+            {
+                "source": c["source"],
+                "domain": c["domain"],
+                "authority": c["authority"],
+            }
+            for c in all_chunks
+        ],
     )
     print(f"Indexed {len(all_chunks)} chunks from {len(pdfs)} policy PDFs.")
 

@@ -1,5 +1,6 @@
 """SQLite-backed job status + audit log, shared by api/main.py and streamlit_app.py.
 NOT encrypted at rest — see TODO.md."""
+
 from __future__ import annotations
 
 import json
@@ -7,9 +8,26 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, String, Text, UniqueConstraint, create_engine, event
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    String,
+    Text,
+    UniqueConstraint,
+    create_engine,
+    event,
+)
 from sqlalchemy.engine import Engine
-from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
+from sqlalchemy.orm import (
+    DeclarativeBase,
+    Mapped,
+    Session,
+    mapped_column,
+    relationship,
+    sessionmaker,
+)
 
 from claimflow.config import settings
 
@@ -29,8 +47,17 @@ class Package(Base):
     __tablename__ = "packages"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
-    status: Mapped[str] = mapped_column(String, default="queued", index=True)  # queued|processing|completed|failed
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc), index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+    status: Mapped[str] = mapped_column(
+        String, default="queued", index=True
+    )  # queued|processing|completed|failed
     result_json: Mapped[str | None] = mapped_column(Text, default=None)
     error: Mapped[str | None] = mapped_column(Text, default=None)
 
@@ -53,25 +80,35 @@ class AuditLogEntry(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     package_id: Mapped[str] = mapped_column(String, index=True)
-    timestamp: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
     actor: Mapped[str] = mapped_column(String)  # e.g. "api", "reviewer"
-    action: Mapped[str] = mapped_column(String)  # e.g. "upload", "extract", "validate", "review_edit"
+    action: Mapped[str] = mapped_column(
+        String
+    )  # e.g. "upload", "extract", "validate", "review_edit"
     detail_json: Mapped[str | None] = mapped_column(Text, default=None)
 
 
 class Document(Base):
     __tablename__ = "documents"
-    __table_args__ = (UniqueConstraint("package_id", "path", name="uq_document_package_path"),)
+    __table_args__ = (
+        UniqueConstraint("package_id", "path", name="uq_document_package_path"),
+    )
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
-    package_id: Mapped[str] = mapped_column(ForeignKey("packages.id", ondelete="CASCADE"), index=True)
+    package_id: Mapped[str] = mapped_column(
+        ForeignKey("packages.id", ondelete="CASCADE"), index=True
+    )
     path: Mapped[str] = mapped_column(String)
     doc_type: Mapped[str] = mapped_column(String)
     has_text_layer: Mapped[bool] = mapped_column(Boolean)
     scan_quality: Mapped[float | None] = mapped_column(Float, default=None)
     classification_reason: Mapped[str | None] = mapped_column(Text, default=None)
     manually_overridden: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
 
     package: Mapped["Package"] = relationship(back_populates="documents")
     extraction_runs: Mapped[list["ExtractionRun"]] = relationship(
@@ -83,22 +120,32 @@ class ExtractionRun(Base):
     __tablename__ = "extraction_runs"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
-    document_id: Mapped[str] = mapped_column(ForeignKey("documents.id", ondelete="CASCADE"), index=True)
+    document_id: Mapped[str] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE"), index=True
+    )
     schema_name: Mapped[str] = mapped_column(String)
     attempt: Mapped[int] = mapped_column(default=1)
     status: Mapped[str] = mapped_column(String)  # pass|review|error
     overall_confidence: Mapped[float] = mapped_column(Float)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
 
     document: Mapped["Document"] = relationship(back_populates="extraction_runs")
     extracted_fields: Mapped[list["ExtractedField"]] = relationship(
-        back_populates="extraction_run", cascade="all, delete-orphan", passive_deletes=True
+        back_populates="extraction_run",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
     validation_failures: Mapped[list["ValidationFailure"]] = relationship(
-        back_populates="extraction_run", cascade="all, delete-orphan", passive_deletes=True
+        back_populates="extraction_run",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
     review_actions: Mapped[list["ReviewAction"]] = relationship(
-        back_populates="extraction_run", cascade="all, delete-orphan", passive_deletes=True
+        back_populates="extraction_run",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
 
 
@@ -106,7 +153,9 @@ class ExtractedField(Base):
     __tablename__ = "extracted_fields"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    extraction_run_id: Mapped[str] = mapped_column(ForeignKey("extraction_runs.id", ondelete="CASCADE"), index=True)
+    extraction_run_id: Mapped[str] = mapped_column(
+        ForeignKey("extraction_runs.id", ondelete="CASCADE"), index=True
+    )
     name: Mapped[str] = mapped_column(String)
     parent_field: Mapped[str | None] = mapped_column(String, default=None, index=True)
     value_json: Mapped[str | None] = mapped_column(Text, default=None)
@@ -116,32 +165,44 @@ class ExtractedField(Base):
     field_status: Mapped[str] = mapped_column(String, index=True)
     evidence_json: Mapped[str | None] = mapped_column(Text, default=None)
 
-    extraction_run: Mapped["ExtractionRun"] = relationship(back_populates="extracted_fields")
+    extraction_run: Mapped["ExtractionRun"] = relationship(
+        back_populates="extracted_fields"
+    )
 
 
 class ValidationFailure(Base):
     __tablename__ = "validation_failures"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    extraction_run_id: Mapped[str] = mapped_column(ForeignKey("extraction_runs.id", ondelete="CASCADE"), index=True)
+    extraction_run_id: Mapped[str] = mapped_column(
+        ForeignKey("extraction_runs.id", ondelete="CASCADE"), index=True
+    )
     field: Mapped[str] = mapped_column(String)
     rule: Mapped[str] = mapped_column(String)
     reason: Mapped[str] = mapped_column(Text)
     superseded: Mapped[bool] = mapped_column(default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
 
-    extraction_run: Mapped["ExtractionRun"] = relationship(back_populates="validation_failures")
+    extraction_run: Mapped["ExtractionRun"] = relationship(
+        back_populates="validation_failures"
+    )
 
 
 class PolicyEvidence(Base):
     __tablename__ = "policy_evidence"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    package_id: Mapped[str] = mapped_column(ForeignKey("packages.id", ondelete="CASCADE"), index=True)
+    package_id: Mapped[str] = mapped_column(
+        ForeignKey("packages.id", ondelete="CASCADE"), index=True
+    )
     question: Mapped[str] = mapped_column(Text)
     answer: Mapped[str] = mapped_column(Text)
     citations_json: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
 
     package: Mapped["Package"] = relationship(back_populates="policy_evidence_entries")
 
@@ -150,10 +211,14 @@ class Decision(Base):
     __tablename__ = "decisions"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    package_id: Mapped[str] = mapped_column(ForeignKey("packages.id", ondelete="CASCADE"), index=True)
+    package_id: Mapped[str] = mapped_column(
+        ForeignKey("packages.id", ondelete="CASCADE"), index=True
+    )
     decision: Mapped[str] = mapped_column(String)  # approved|flagged|escalated
     review_reasons_json: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
 
     package: Mapped["Package"] = relationship(back_populates="decisions")
 
@@ -162,7 +227,9 @@ class ReviewAction(Base):
     __tablename__ = "review_actions"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    extraction_run_id: Mapped[str] = mapped_column(ForeignKey("extraction_runs.id", ondelete="CASCADE"), index=True)
+    extraction_run_id: Mapped[str] = mapped_column(
+        ForeignKey("extraction_runs.id", ondelete="CASCADE"), index=True
+    )
     field_name: Mapped[str] = mapped_column(String)
     action: Mapped[str] = mapped_column(String)  # approve|edit|reject
     original_value_json: Mapped[str | None] = mapped_column(Text, default=None)
@@ -171,9 +238,13 @@ class ReviewAction(Base):
     validation_after_json: Mapped[str | None] = mapped_column(Text, default=None)
     reviewer: Mapped[str] = mapped_column(String, default="reviewer")
     note: Mapped[str | None] = mapped_column(Text, default=None)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
 
-    extraction_run: Mapped["ExtractionRun"] = relationship(back_populates="review_actions")
+    extraction_run: Mapped["ExtractionRun"] = relationship(
+        back_populates="review_actions"
+    )
 
 
 def _make_engine():
@@ -193,8 +264,9 @@ def init_db() -> None:
     throwaway per-test DB (see tests/conftest.py) for speed/isolation."""
     from pathlib import Path
 
-    from alembic import command
     from alembic.config import Config
+
+    from alembic import command
 
     cfg = Config(str(Path(__file__).resolve().parent.parent.parent / "alembic.ini"))
     command.upgrade(cfg, "head")
@@ -208,7 +280,11 @@ def create_package(session: Session, package_id: str) -> Package:
 
 
 def update_package_status(
-    session: Session, package_id: str, status: str, result: dict | None = None, error: str | None = None
+    session: Session,
+    package_id: str,
+    status: str,
+    result: dict | None = None,
+    error: str | None = None,
 ) -> None:
     pkg = session.get(Package, package_id)
     pkg.status = status
@@ -234,7 +310,10 @@ def transition_package_status(
     previous_status = pkg.status
     update_package_status(session, package_id, status, result=result, error=error)
     log_audit(
-        session, package_id, "api", "status_transition",
+        session,
+        package_id,
+        "api",
+        "status_transition",
         {"from": previous_status, "to": status, "reason": reason},
     )
 
@@ -248,15 +327,23 @@ def recover_stale_processing_packages(session: Session) -> list[str]:
     recovered_ids = []
     for pkg in stuck:
         transition_package_status(
-            session, pkg.id, "processing_error",
-            reason="restart_recovery", error="process interrupted by application restart",
+            session,
+            pkg.id,
+            "processing_error",
+            reason="restart_recovery",
+            error="process interrupted by application restart",
         )
         recovered_ids.append(pkg.id)
     return recovered_ids
 
 
 _RETRYABLE_STATUSES = (
-    "queued", "review_ready", "completed", "processing_error", "validation_error", "retrieval_error",
+    "queued",
+    "review_ready",
+    "completed",
+    "processing_error",
+    "validation_error",
+    "retrieval_error",
 )
 
 
@@ -276,15 +363,31 @@ def try_start_processing(session: Session, package_id: str) -> bool:
     session.commit()
     if result.rowcount == 0:
         return False
-    log_audit(session, package_id, "api", "status_transition", {"from": previous_status, "to": "processing", "reason": "process started"})
+    log_audit(
+        session,
+        package_id,
+        "api",
+        "status_transition",
+        {"from": previous_status, "to": "processing", "reason": "process started"},
+    )
     return True
 
 
-def log_audit(session: Session, package_id: str, actor: str, action: str, detail: dict | None = None) -> None:
-    session.add(AuditLogEntry(
-        package_id=package_id, actor=actor, action=action,
-        detail_json=json.dumps(detail) if detail is not None else None,
-    ))
+def log_audit(
+    session: Session,
+    package_id: str,
+    actor: str,
+    action: str,
+    detail: dict | None = None,
+) -> None:
+    session.add(
+        AuditLogEntry(
+            package_id=package_id,
+            actor=actor,
+            action=action,
+            detail_json=json.dumps(detail) if detail is not None else None,
+        )
+    )
     session.commit()
 
 
@@ -297,7 +400,12 @@ def create_document(session: Session, package_id: str, doc: dict) -> Document:
         .one_or_none()
     )
     if row is None:
-        row = Document(id=str(uuid.uuid4()), package_id=package_id, path=doc["path"], manually_overridden=False)
+        row = Document(
+            id=str(uuid.uuid4()),
+            package_id=package_id,
+            path=doc["path"],
+            manually_overridden=False,
+        )
         session.add(row)
 
     row.doc_type = doc["doc_type"]
@@ -310,9 +418,15 @@ def create_document(session: Session, package_id: str, doc: dict) -> Document:
 
 
 def create_extraction_run(
-    session: Session, document_id: str, schema_name: str, status: str, overall_confidence: float
+    session: Session,
+    document_id: str,
+    schema_name: str,
+    status: str,
+    overall_confidence: float,
 ) -> ExtractionRun:
-    prior_attempts = session.query(ExtractionRun).filter_by(document_id=document_id).count()
+    prior_attempts = (
+        session.query(ExtractionRun).filter_by(document_id=document_id).count()
+    )
     row = ExtractionRun(
         id=str(uuid.uuid4()),
         document_id=document_id,
@@ -326,7 +440,9 @@ def create_extraction_run(
     return row
 
 
-def create_extracted_fields(session: Session, extraction_run_id: str, fields: list[dict]) -> list[ExtractedField]:
+def create_extracted_fields(
+    session: Session, extraction_run_id: str, fields: list[dict]
+) -> list[ExtractedField]:
     rows = [
         ExtractedField(
             extraction_run_id=extraction_run_id,
@@ -337,7 +453,9 @@ def create_extracted_fields(session: Session, extraction_run_id: str, fields: li
             grounded=f["grounded"],
             valid=f["valid"],
             field_status=f["field_status"],
-            evidence_json=json.dumps(f["evidence"]) if f.get("evidence") is not None else None,
+            evidence_json=json.dumps(f["evidence"])
+            if f.get("evidence") is not None
+            else None,
         )
         for f in fields
     ]
@@ -350,7 +468,12 @@ def create_validation_failures(
     session: Session, extraction_run_id: str, failures: list[dict]
 ) -> list[ValidationFailure]:
     rows = [
-        ValidationFailure(extraction_run_id=extraction_run_id, field=f["field"], rule=f["rule"], reason=f["reason"])
+        ValidationFailure(
+            extraction_run_id=extraction_run_id,
+            field=f["field"],
+            rule=f["rule"],
+            reason=f["reason"],
+        )
         for f in failures
     ]
     session.add_all(rows)
@@ -358,10 +481,14 @@ def create_validation_failures(
     return rows
 
 
-def create_policy_evidence(session: Session, package_id: str, answers: list[dict]) -> list[PolicyEvidence]:
+def create_policy_evidence(
+    session: Session, package_id: str, answers: list[dict]
+) -> list[PolicyEvidence]:
     rows = [
         PolicyEvidence(
-            package_id=package_id, question=a["question"], answer=a["answer"],
+            package_id=package_id,
+            question=a["question"],
+            answer=a["answer"],
             citations_json=json.dumps(a["citations"]),
         )
         for a in answers
@@ -371,11 +498,52 @@ def create_policy_evidence(session: Session, package_id: str, answers: list[dict
     return rows
 
 
-def create_decision(session: Session, package_id: str, decision: str, review_reasons: list[str]) -> Decision:
-    row = Decision(package_id=package_id, decision=decision, review_reasons_json=json.dumps(review_reasons))
+def replace_policy_evidence(
+    session: Session, package_id: str, answers: list[dict]
+) -> list[PolicyEvidence]:
+    """Replace the package's current policy answers after a reprocessing run."""
+    session.query(PolicyEvidence).filter_by(package_id=package_id).delete()
+    rows = [
+        PolicyEvidence(
+            package_id=package_id,
+            question=answer["question"],
+            answer=answer["answer"],
+            citations_json=json.dumps(answer["citations"]),
+        )
+        for answer in answers
+    ]
+    session.add_all(rows)
+    session.commit()
+    return rows
+
+
+def create_decision(
+    session: Session, package_id: str, decision: str, review_reasons: list[str]
+) -> Decision:
+    row = Decision(
+        package_id=package_id,
+        decision=decision,
+        review_reasons_json=json.dumps(review_reasons),
+    )
     session.add(row)
     session.commit()
     return row
+
+
+def latest_review_actions_for_run(
+    session: Session, extraction_run_id: str
+) -> dict[str, ReviewAction]:
+    """Latest ReviewAction per field_name for a run — the current reviewer verdict per field."""
+    latest: dict[str, ReviewAction] = {}
+    rows = (
+        session.query(ReviewAction)
+        .filter_by(extraction_run_id=extraction_run_id)
+        .order_by(ReviewAction.created_at, ReviewAction.id)
+        .all()
+    )
+    for row in rows:
+        latest[row.field_name] = row  # later rows overwrite earlier ones per field_name
+    return latest
 
 
 def record_review_action(
@@ -391,7 +559,9 @@ def record_review_action(
     reviewer: str = "reviewer",
     note: str | None = None,
 ) -> ReviewAction:
-    corrected_value_json = json.dumps(corrected_value) if corrected_value is not None else None
+    corrected_value_json = (
+        json.dumps(corrected_value) if corrected_value is not None else None
+    )
     existing = (
         session.query(ReviewAction)
         .filter_by(extraction_run_id=extraction_run_id, field_name=field_name)
@@ -411,10 +581,16 @@ def record_review_action(
         extraction_run_id=extraction_run_id,
         field_name=field_name,
         action=action,
-        original_value_json=json.dumps(original_value) if original_value is not None else None,
+        original_value_json=json.dumps(original_value)
+        if original_value is not None
+        else None,
         corrected_value_json=corrected_value_json,
-        validation_before_json=json.dumps(validation_before) if validation_before is not None else None,
-        validation_after_json=json.dumps(validation_after) if validation_after is not None else None,
+        validation_before_json=json.dumps(validation_before)
+        if validation_before is not None
+        else None,
+        validation_after_json=json.dumps(validation_after)
+        if validation_after is not None
+        else None,
         reviewer=reviewer,
         note=note,
     )
@@ -436,12 +612,16 @@ def persist_extraction_result(session: Session, package_id: str, result: dict) -
     domain = result.get("domain")
     doc_rows = [create_document(session, package_id, doc) for doc in documents]
 
-    claim_doc_row = next((d for d, src in zip(doc_rows, documents) if src["doc_type"] == domain), None)
+    claim_doc_row = next(
+        (d for d, src in zip(doc_rows, documents) if src["doc_type"] == domain), None
+    )
     if claim_doc_row is None:
         return
 
     run = create_extraction_run(
-        session, claim_doc_row.id, domain or "unknown",
+        session,
+        claim_doc_row.id,
+        domain or "unknown",
         result.get("extraction_status") or "error",
         result.get("extraction_overall_confidence") or 0.0,
     )
@@ -450,10 +630,11 @@ def persist_extraction_result(session: Session, package_id: str, result: dict) -
         create_extracted_fields(session, run.id, result["extraction_fields"])
     if result.get("validation_failures"):
         create_validation_failures(session, run.id, result["validation_failures"])
-    if result.get("policy_answers"):
-        create_policy_evidence(session, package_id, result["policy_answers"])
+    replace_policy_evidence(session, package_id, result.get("policy_answers") or [])
     if result.get("decision"):
-        create_decision(session, package_id, result["decision"], result.get("review_reasons") or [])
+        create_decision(
+            session, package_id, result["decision"], result.get("review_reasons") or []
+        )
 
 
 def list_packages(session: Session) -> list[Package]:
@@ -502,7 +683,12 @@ def list_packages_filtered(
     candidates = query.all()
 
     def _matches(pkg: Package) -> bool:
-        if domain is not None or confidence_min is not None or confidence_max is not None or validation_rule is not None:
+        if (
+            domain is not None
+            or confidence_min is not None
+            or confidence_max is not None
+            or validation_rule is not None
+        ):
             run = latest_extraction_run_for_package(session, pkg.id)
             if run is None:
                 return False
@@ -513,7 +699,9 @@ def list_packages_filtered(
             if confidence_max is not None and run.overall_confidence > confidence_max:
                 return False
             if validation_rule is not None:
-                failures = list_validation_failures_for_run(session, run.id, current_only=True)
+                failures = list_validation_failures_for_run(
+                    session, run.id, current_only=True
+                )
                 if not any(f.rule == validation_rule for f in failures):
                     return False
         if decision is not None:
@@ -524,8 +712,30 @@ def list_packages_filtered(
 
     filtered = [pkg for pkg in candidates if _matches(pkg)]
 
-    descending = sort.startswith("-")
-    filtered.sort(key=lambda p: p.created_at, reverse=descending)
+    sort_key = sort.lstrip("-")
+    descending = sort.startswith("-") or sort_key == ""
+    if sort_key in ("confidence",):
+
+        def _key(p: Package) -> float:
+            run = latest_extraction_run_for_package(session, p.id)
+            return run.overall_confidence if run else 0.0
+    elif sort_key in ("validation_failure_count", "failures"):
+
+        def _key(p: Package) -> int:
+            run = latest_extraction_run_for_package(session, p.id)
+            return (
+                len(
+                    list_validation_failures_for_run(session, run.id, current_only=True)
+                )
+                if run
+                else 0
+            )
+    else:
+
+        def _key(p: Package) -> datetime:
+            return p.created_at
+
+    filtered.sort(key=_key, reverse=descending)
 
     total = len(filtered)
     page = max(page, 1)
@@ -534,14 +744,45 @@ def list_packages_filtered(
     return filtered[start : start + page_size], total
 
 
+def package_read_model(session: Session, pkg: Package) -> dict:
+    """Enriches a Package row with its latest run/decision for list views
+    (PackageSummary) — read-only projection, not a new persistence concept."""
+    run = latest_extraction_run_for_package(session, pkg.id)
+    decision = latest_decision_for_package(session, pkg.id)
+    document_count = session.query(Document).filter_by(package_id=pkg.id).count()
+    failure_count = (
+        len(list_validation_failures_for_run(session, run.id, current_only=True))
+        if run
+        else 0
+    )
+    return {
+        "package_id": pkg.id,
+        "status": pkg.status,
+        "created_at": pkg.created_at,
+        "updated_at": pkg.updated_at,
+        "domain": run.schema_name if run else None,
+        "decision": decision.decision if decision else None,
+        "review_reasons": json.loads(decision.review_reasons_json) if decision else [],
+        "overall_confidence": run.overall_confidence if run else None,
+        "document_count": document_count,
+        "validation_failure_count": failure_count,
+    }
+
+
 def compute_dashboard_summary(session: Session) -> dict:
     total_packages = session.query(Package).count()
     processing = session.query(Package).filter(Package.status == "processing").count()
-    awaiting_review = session.query(Package).filter(Package.status == "review_ready").count()
+    awaiting_review = (
+        session.query(Package).filter(Package.status == "review_ready").count()
+    )
     approved = session.query(Package).filter(Package.status == "completed").count()
     processing_errors = (
         session.query(Package)
-        .filter(Package.status.in_(("processing_error", "validation_error", "retrieval_error")))
+        .filter(
+            Package.status.in_(
+                ("processing_error", "validation_error", "retrieval_error")
+            )
+        )
         .count()
     )
 
@@ -567,7 +808,9 @@ def compute_dashboard_summary(session: Session) -> dict:
         rule_counts[failure.rule] = rule_counts.get(failure.rule, 0) + 1
     top_validation_failures = [
         {"rule": rule, "count": count}
-        for rule, count in sorted(rule_counts.items(), key=lambda kv: kv[1], reverse=True)[:5]
+        for rule, count in sorted(
+            rule_counts.items(), key=lambda kv: kv[1], reverse=True
+        )[:5]
     ]
 
     return {
@@ -597,7 +840,12 @@ def delete_package(session: Session, package_id: str) -> bool:
 
 
 def list_documents(session: Session, package_id: str) -> list[Document]:
-    return list(session.query(Document).filter_by(package_id=package_id).order_by(Document.created_at).all())
+    return list(
+        session.query(Document)
+        .filter_by(package_id=package_id)
+        .order_by(Document.created_at)
+        .all()
+    )
 
 
 def get_document(session: Session, document_id: str) -> Document | None:
@@ -608,14 +856,22 @@ def get_extracted_field(session: Session, field_id: int) -> ExtractedField | Non
     return session.get(ExtractedField, field_id)
 
 
-def list_extracted_fields_for_run(session: Session, extraction_run_id: str) -> list[ExtractedField]:
-    return list(session.query(ExtractedField).filter_by(extraction_run_id=extraction_run_id).all())
+def list_extracted_fields_for_run(
+    session: Session, extraction_run_id: str
+) -> list[ExtractedField]:
+    return list(
+        session.query(ExtractedField)
+        .filter_by(extraction_run_id=extraction_run_id)
+        .all()
+    )
 
 
 def list_validation_failures_for_run(
     session: Session, extraction_run_id: str, current_only: bool = False
 ) -> list[ValidationFailure]:
-    query = session.query(ValidationFailure).filter_by(extraction_run_id=extraction_run_id)
+    query = session.query(ValidationFailure).filter_by(
+        extraction_run_id=extraction_run_id
+    )
     if current_only:
         query = query.filter_by(superseded=False)
     return list(query.all())
@@ -624,13 +880,15 @@ def list_validation_failures_for_run(
 def supersede_validation_failures(session: Session, extraction_run_id: str) -> None:
     """Marks a run's current validation failures as historical (audit trail) —
     never deletes them — so a rerun's new failures become the only "current" set."""
-    session.query(ValidationFailure).filter_by(extraction_run_id=extraction_run_id, superseded=False).update(
-        {"superseded": True}
-    )
+    session.query(ValidationFailure).filter_by(
+        extraction_run_id=extraction_run_id, superseded=False
+    ).update({"superseded": True})
     session.commit()
 
 
-def latest_extraction_run_for_package(session: Session, package_id: str) -> ExtractionRun | None:
+def latest_extraction_run_for_package(
+    session: Session, package_id: str
+) -> ExtractionRun | None:
     return (
         session.query(ExtractionRun)
         .join(Document, ExtractionRun.document_id == Document.id)
@@ -640,7 +898,9 @@ def latest_extraction_run_for_package(session: Session, package_id: str) -> Extr
     )
 
 
-def list_policy_evidence_for_package(session: Session, package_id: str) -> list[PolicyEvidence]:
+def list_policy_evidence_for_package(
+    session: Session, package_id: str
+) -> list[PolicyEvidence]:
     return list(session.query(PolicyEvidence).filter_by(package_id=package_id).all())
 
 
@@ -654,12 +914,22 @@ def latest_decision_for_package(session: Session, package_id: str) -> Decision |
 
 
 def list_decisions_for_package(session: Session, package_id: str) -> list[Decision]:
-    return list(session.query(Decision).filter_by(package_id=package_id).order_by(Decision.created_at).all())
-
-
-def list_audit_events_for_package(session: Session, package_id: str) -> list[AuditLogEntry]:
     return list(
-        session.query(AuditLogEntry).filter_by(package_id=package_id).order_by(AuditLogEntry.timestamp).all()
+        session.query(Decision)
+        .filter_by(package_id=package_id)
+        .order_by(Decision.created_at)
+        .all()
+    )
+
+
+def list_audit_events_for_package(
+    session: Session, package_id: str
+) -> list[AuditLogEntry]:
+    return list(
+        session.query(AuditLogEntry)
+        .filter_by(package_id=package_id)
+        .order_by(AuditLogEntry.timestamp)
+        .all()
     )
 
 
@@ -669,7 +939,9 @@ def list_flagged_packages(session: Session) -> list[Package]:
         latest_by_package[decision.package_id] = decision
 
     flagged_ids = [
-        pid for pid, decision in latest_by_package.items() if decision.decision in ("flagged", "escalated")
+        pid
+        for pid, decision in latest_by_package.items()
+        if decision.decision in ("flagged", "escalated")
     ]
     if not flagged_ids:
         return []

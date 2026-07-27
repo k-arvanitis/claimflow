@@ -3,6 +3,7 @@
 Usage: uv run python scripts/generate_policies.py
 Output: data/policies/{health,property,loan}_policy.pdf
 """
+
 from pathlib import Path
 
 from fpdf import FPDF
@@ -13,121 +14,157 @@ _POLICIES = {
     "health_policy.pdf": {
         "title": "Standard Health Insurance Claims Policy Manual",
         "sections": [
-            ("1. Covered Procedure Codes",
-             "All procedure codes submitted on a CMS-1500 claim form must be valid CPT codes "
-             "listed in the current AMA CPT codebook. Unlisted or experimental procedure codes "
-             "require prior authorization. Code 99213 covers office visits for established patients "
-             "with moderate complexity. Code 99214 covers office visits of moderate-high complexity. "
-             "Services must be medically necessary and documented in the patient record."),
-            ("2. Diagnosis Code Requirements",
-             "All diagnosis codes must be valid ICD-10-CM codes at the highest level of specificity. "
-             "Codes must be in effect for the date of service. J06.9 covers acute upper respiratory "
-             "infection, unspecified. Codes must support medical necessity of services billed. "
-             "Combination codes should be used when available rather than multiple separate codes."),
-            ("3. Charge Discrepancies",
-             "When the sum of individual service line charges does not equal the total charge in Box 28, "
-             "the claim will be flagged for manual review. Discrepancies of more than $0.01 require "
-             "a corrected claim or written explanation. Arithmetic errors are a common reason for "
-             "claim delay. The billing provider is responsible for ensuring mathematical accuracy."),
-            ("4. Signature Requirements",
-             "Physician signature must be on file before submission. Box 31 must contain either the "
-             "physician's handwritten signature or a stamped signature with authorization on file. "
-             "Electronic signatures are accepted if the provider has a signed authorization agreement. "
-             "Claims submitted without a valid signature will be rejected and returned."),
-            ("5. Date of Service Rules",
-             "Dates of service must not be in the future. Services rendered more than 12 months prior "
-             "to submission date may be denied for timely filing. Hospitalization dates in Box 18 must "
-             "encompass the dates in Box 24. Dates must be formatted as MMDDYYYY with no separators."),
-            ("6. Appeals Process",
-             "Claims denied for any reason may be appealed within 180 days of the denial date. "
-             "Appeals must include the original claim, the denial notice, and supporting documentation. "
-             "First-level appeals are reviewed within 30 days. Expedited appeals for urgent care are "
-             "reviewed within 72 hours. Written notification of appeal decisions is provided."),
-        ]
+            (
+                "1. Covered Procedure Codes",
+                "All procedure codes submitted on a CMS-1500 claim form must be valid CPT codes "
+                "listed in the current AMA CPT codebook. Unlisted or experimental procedure codes "
+                "require prior authorization. Code 99213 covers office visits for established patients "
+                "with moderate complexity. Code 99214 covers office visits of moderate-high complexity. "
+                "Services must be medically necessary and documented in the patient record.",
+            ),
+            (
+                "2. Diagnosis Code Requirements",
+                "All diagnosis codes must be valid ICD-10-CM codes at the highest level of specificity. "
+                "Codes must be in effect for the date of service. J06.9 covers acute upper respiratory "
+                "infection, unspecified. Codes must support medical necessity of services billed. "
+                "Combination codes should be used when available rather than multiple separate codes.",
+            ),
+            (
+                "3. Charge Discrepancies",
+                "When the sum of individual service line charges does not equal the total charge in Box 28, "
+                "the claim will be flagged for manual review. Discrepancies of more than $0.01 require "
+                "a corrected claim or written explanation. Arithmetic errors are a common reason for "
+                "claim delay. The billing provider is responsible for ensuring mathematical accuracy.",
+            ),
+            (
+                "4. Signature Requirements",
+                "Physician signature must be on file before submission. Box 31 must contain either the "
+                "physician's handwritten signature or a stamped signature with authorization on file. "
+                "Electronic signatures are accepted if the provider has a signed authorization agreement. "
+                "Claims submitted without a valid signature will be rejected and returned.",
+            ),
+            (
+                "5. Date of Service Rules",
+                "Dates of service must not be in the future. Services rendered more than 12 months prior "
+                "to submission date may be denied for timely filing. Hospitalization dates in Box 18 must "
+                "encompass the dates in Box 24. Dates must be formatted as MMDDYYYY with no separators.",
+            ),
+            (
+                "6. Appeals Process",
+                "Claims denied for any reason may be appealed within 180 days of the denial date. "
+                "Appeals must include the original claim, the denial notice, and supporting documentation. "
+                "First-level appeals are reviewed within 30 days. Expedited appeals for urgent care are "
+                "reviewed within 72 hours. Written notification of appeal decisions is provided.",
+            ),
+        ],
     },
     "property_policy.pdf": {
         "title": "Property Damage Claims Policy Manual - Xactimate Estimates",
         "sections": [
-            ("1. Line Item Arithmetic Requirements",
-             "Each line item in a property damage estimate must have a verifiable total equal to "
-             "quantity multiplied by unit cost. The sum of all line item totals must equal the "
-             "total replacement cost value (RCV) listed on the estimate summary page. Discrepancies "
-             "greater than $1.00 will result in the claim being flagged for adjuster review. "
-             "Rounding errors must be documented. Estimates generated by Xactimate software are "
-             "subject to the same arithmetic verification requirements."),
-            ("2. Actual Cash Value Calculation",
-             "Actual cash value (ACV) is calculated as replacement cost value (RCV) minus applicable "
-             "depreciation. ACV must equal RCV minus depreciation within a $1.00 tolerance. "
-             "Depreciation is determined by the age and condition of the damaged property. "
-             "Non-recoverable depreciation applies to certain materials per policy schedule. "
-             "Recoverable depreciation may be claimed upon completion of repairs with proof of payment. "
-             "ACV mismatch is grounds for claim suspension pending correction."),
-            ("3. Negative Amount Policy",
-             "No line item in a property damage estimate may carry a negative dollar value. "
-             "Credits or offsets must be documented separately and approved by the claims adjuster. "
-             "Negative totals on any line item will result in automatic claim flagging. "
-             "Salvage value credits must be entered as separate negative-amount line items only "
-             "with explicit adjuster approval and will be reviewed case by case."),
-            ("4. Date of Loss Requirements",
-             "The date of loss must be on or before the claim submission date. A future date of loss "
-             "indicates a data entry error and the claim will be returned for correction. Date of loss "
-             "must fall within the active policy period. Claims for losses occurring before policy "
-             "inception or after policy expiration are not covered. Dates must be in MMDDYYYY format."),
-            ("5. Required Fields",
-             "Every property damage estimate must include: claim number, insured name, property address, "
-             "date of loss, cause of loss, at least one line item, and a total replacement cost value. "
-             "Missing mandatory fields result in claim suspension. The claims adjuster must be named "
-             "when an adjuster has been assigned. Cause of loss must match a covered peril under the "
-             "applicable policy (wind, hail, water, fire, vandalism, etc.)."),
-            ("6. Covered Perils",
-             "Standard homeowner policies cover the following perils: fire, lightning, windstorm, hail, "
-             "explosion, riot, aircraft damage, vehicle damage, smoke, vandalism, theft, falling objects, "
-             "weight of ice/snow, accidental discharge, freezing of pipes, and electrical surge. "
-             "Flood and earthquake are typically excluded unless specifically endorsed. Wear and tear, "
-             "gradual deterioration, and maintenance items are not covered losses."),
-        ]
+            (
+                "1. Line Item Arithmetic Requirements",
+                "Each line item in a property damage estimate must have a verifiable total equal to "
+                "quantity multiplied by unit cost. The sum of all line item totals must equal the "
+                "total replacement cost value (RCV) listed on the estimate summary page. Discrepancies "
+                "greater than $1.00 will result in the claim being flagged for adjuster review. "
+                "Rounding errors must be documented. Estimates generated by Xactimate software are "
+                "subject to the same arithmetic verification requirements.",
+            ),
+            (
+                "2. Actual Cash Value Calculation",
+                "Actual cash value (ACV) is calculated as replacement cost value (RCV) minus applicable "
+                "depreciation. ACV must equal RCV minus depreciation within a $1.00 tolerance. "
+                "Depreciation is determined by the age and condition of the damaged property. "
+                "Non-recoverable depreciation applies to certain materials per policy schedule. "
+                "Recoverable depreciation may be claimed upon completion of repairs with proof of payment. "
+                "ACV mismatch is grounds for claim suspension pending correction.",
+            ),
+            (
+                "3. Negative Amount Policy",
+                "No line item in a property damage estimate may carry a negative dollar value. "
+                "Credits or offsets must be documented separately and approved by the claims adjuster. "
+                "Negative totals on any line item will result in automatic claim flagging. "
+                "Salvage value credits must be entered as separate negative-amount line items only "
+                "with explicit adjuster approval and will be reviewed case by case.",
+            ),
+            (
+                "4. Date of Loss Requirements",
+                "The date of loss must be on or before the claim submission date. A future date of loss "
+                "indicates a data entry error and the claim will be returned for correction. Date of loss "
+                "must fall within the active policy period. Claims for losses occurring before policy "
+                "inception or after policy expiration are not covered. Dates must be in MMDDYYYY format.",
+            ),
+            (
+                "5. Required Fields",
+                "Every property damage estimate must include: claim number, insured name, property address, "
+                "date of loss, cause of loss, at least one line item, and a total replacement cost value. "
+                "Missing mandatory fields result in claim suspension. The claims adjuster must be named "
+                "when an adjuster has been assigned. Cause of loss must match a covered peril under the "
+                "applicable policy (wind, hail, water, fire, vandalism, etc.).",
+            ),
+            (
+                "6. Covered Perils",
+                "Standard homeowner policies cover the following perils: fire, lightning, windstorm, hail, "
+                "explosion, riot, aircraft damage, vehicle damage, smoke, vandalism, theft, falling objects, "
+                "weight of ice/snow, accidental discharge, freezing of pipes, and electrical surge. "
+                "Flood and earthquake are typically excluded unless specifically endorsed. Wear and tear, "
+                "gradual deterioration, and maintenance items are not covered losses.",
+            ),
+        ],
     },
     "loan_policy.pdf": {
         "title": "Business Loan Application Policy Manual - SBA Guidelines",
         "sections": [
-            ("1. Minimum Loan Amount",
-             "All SBA loan applications must request a minimum of $5,000. Loan amounts of zero or below "
-             "indicate a data entry error and the application will be returned for correction. The maximum "
-             "SBA 7(a) loan amount is $5 million. SBA Express loans are capped at $500,000. "
-             "Loan purpose must align with the requested loan amount - disproportionate amounts "
-             "relative to stated purpose will trigger additional underwriting review."),
-            ("2. Income Verification Requirements",
-             "Net income may not exceed gross revenue on any submitted financial statement. "
-             "A net income figure greater than gross revenue indicates an error in the financial "
-             "statements and the application will be suspended for correction. Applicants must "
-             "provide two years of business tax returns and two years of personal tax returns. "
-             "Financial statements must be prepared by a CPA or certified financial officer for "
-             "loan amounts exceeding $250,000. Inconsistent income data triggers mandatory review."),
-            ("3. Signature Requirements",
-             "The primary applicant and all co-applicants with 20% or more ownership must sign the "
-             "application. Missing signatures result in immediate application suspension. Electronic "
-             "signatures are accepted under E-SIGN Act compliance. Personal guarantee signature "
-             "is required from all owners with 20% or more equity stake. Applications submitted "
-             "without all required signatures will not be processed until complete."),
-            ("4. Required Documentation",
-             "Every loan application must include: applicant legal name, tax identification number "
-             "(EIN or SSN), requested loan amount, and stated loan purpose. Business name is required "
-             "for all commercial applications. Missing mandatory fields will result in application "
-             "return with a written deficiency notice. Applicants have 30 days to cure deficiencies "
-             "before the application is closed."),
-            ("5. Tax ID Requirements",
-             "All applications must include a valid Employer Identification Number (EIN) formatted as "
-             "XX-XXXXXXX, or a Social Security Number (SSN) formatted as XXX-XX-XXXX for sole "
-             "proprietors. Tax IDs are verified against IRS records before loan approval. "
-             "Mismatched tax IDs result in application suspension pending verification. "
-             "New businesses without an EIN must apply for one before submitting a loan application."),
-            ("6. Loan Purpose Eligibility",
-             "Eligible loan purposes include: working capital, business acquisition, equipment purchase, "
-             "real estate purchase or refinance, construction, leasehold improvements, and debt "
-             "refinancing (with restrictions). Ineligible purposes include: passive investment, "
-             "lending, life insurance purchase, repaying delinquent taxes, and any illegal activity. "
-             "Loan purpose must be documented with supporting business plan or purchase agreements."),
-        ]
+            (
+                "1. Minimum Loan Amount",
+                "All SBA loan applications must request a minimum of $5,000. Loan amounts of zero or below "
+                "indicate a data entry error and the application will be returned for correction. The maximum "
+                "SBA 7(a) loan amount is $5 million. SBA Express loans are capped at $500,000. "
+                "Loan purpose must align with the requested loan amount - disproportionate amounts "
+                "relative to stated purpose will trigger additional underwriting review.",
+            ),
+            (
+                "2. Income Verification Requirements",
+                "Net income may not exceed gross revenue on any submitted financial statement. "
+                "A net income figure greater than gross revenue indicates an error in the financial "
+                "statements and the application will be suspended for correction. Applicants must "
+                "provide two years of business tax returns and two years of personal tax returns. "
+                "Financial statements must be prepared by a CPA or certified financial officer for "
+                "loan amounts exceeding $250,000. Inconsistent income data triggers mandatory review.",
+            ),
+            (
+                "3. Signature Requirements",
+                "The primary applicant and all co-applicants with 20% or more ownership must sign the "
+                "application. Missing signatures result in immediate application suspension. Electronic "
+                "signatures are accepted under E-SIGN Act compliance. Personal guarantee signature "
+                "is required from all owners with 20% or more equity stake. Applications submitted "
+                "without all required signatures will not be processed until complete.",
+            ),
+            (
+                "4. Required Documentation",
+                "Every loan application must include: applicant legal name, tax identification number "
+                "(EIN or SSN), requested loan amount, and stated loan purpose. Business name is required "
+                "for all commercial applications. Missing mandatory fields will result in application "
+                "return with a written deficiency notice. Applicants have 30 days to cure deficiencies "
+                "before the application is closed.",
+            ),
+            (
+                "5. Tax ID Requirements",
+                "All applications must include a valid Employer Identification Number (EIN) formatted as "
+                "XX-XXXXXXX, or a Social Security Number (SSN) formatted as XXX-XX-XXXX for sole "
+                "proprietors. Tax IDs are verified against IRS records before loan approval. "
+                "Mismatched tax IDs result in application suspension pending verification. "
+                "New businesses without an EIN must apply for one before submitting a loan application.",
+            ),
+            (
+                "6. Loan Purpose Eligibility",
+                "Eligible loan purposes include: working capital, business acquisition, equipment purchase, "
+                "real estate purchase or refinance, construction, leasehold improvements, and debt "
+                "refinancing (with restrictions). Ineligible purposes include: passive investment, "
+                "lending, life insurance purchase, repaying delinquent taxes, and any illegal activity. "
+                "Loan purpose must be documented with supporting business plan or purchase agreements.",
+            ),
+        ],
     },
 }
 
@@ -138,12 +175,15 @@ def _build_pdf(title: str, sections: list[tuple[str, str]]) -> FPDF:
     pdf.set_auto_page_break(auto=True, margin=20)
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 16)
+    pdf.set_x(pdf.l_margin)
     pdf.multi_cell(pdf.epw, 10, title, align="C")
     pdf.ln(8)
     for heading, body in sections:
         pdf.set_font("Helvetica", "B", 12)
+        pdf.set_x(pdf.l_margin)
         pdf.multi_cell(pdf.epw, 8, heading)
         pdf.set_font("Helvetica", "", 10)
+        pdf.set_x(pdf.l_margin)
         pdf.multi_cell(pdf.epw, 6, body)
         pdf.ln(4)
     return pdf
