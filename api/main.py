@@ -13,12 +13,13 @@ from fastapi.responses import JSONResponse, Response
 
 from claimflow import db, review
 from claimflow.config import settings
-from claimflow.domains import all_domains
+from claimflow.domains.base import all_domains, get as get_domain
 from claimflow.graph import build_graph
 from claimflow.nodes.ingest import INGESTIBLE_SUFFIXES
 from claimflow.nodes.review import review_node
 from claimflow.pages import render_page
 from claimflow.schemas.dashboard import DashboardSummaryResponse
+from claimflow.schemas.domain_packs import DomainPackDetail, DomainPackSummary
 from claimflow.schemas.documents import (
     DocumentReclassifyRequest,
     DocumentReclassifyResponse,
@@ -189,6 +190,51 @@ async def get_settings():
         anthropic_api_key_configured=bool(
             settings.anthropic_api_key.get_secret_value()
         ),
+    )
+
+
+@app.get(
+    "/domain-packs",
+    response_model=list[DomainPackSummary],
+    tags=["domain-packs"],
+    summary="List available domain packs",
+)
+def list_domain_packs():
+    return [
+        DomainPackSummary(
+            key=d.doc_type,
+            display_name=d.display_name or d.doc_type,
+            document_types=[d.doc_type, *sorted(d.supporting_types.keys())],
+        )
+        for d in all_domains()
+    ]
+
+
+@app.get(
+    "/domain-packs/{key}",
+    response_model=DomainPackDetail,
+    tags=["domain-packs"],
+    summary="Inspect a single domain pack's configuration",
+    responses=ERROR_RESPONSES,
+)
+def get_domain_pack(key: str):
+    domain = get_domain(key)
+    if domain is None:
+        raise AppError(404, "DOMAIN_PACK_NOT_FOUND", f"No domain pack registered for {key!r}")
+    model_fields = domain.spec.model.model_fields
+    required = [name for name, f in model_fields.items() if f.is_required()]
+    optional = [name for name, f in model_fields.items() if not f.is_required()]
+    return DomainPackDetail(
+        key=domain.doc_type,
+        display_name=domain.display_name or domain.doc_type,
+        document_types=[domain.doc_type, *sorted(domain.supporting_types.keys())],
+        required_fields=required,
+        optional_fields=optional,
+        confidence_threshold=domain.confidence_threshold or settings.confidence_threshold,
+        escalation_threshold=domain.escalation_threshold or settings.escalation_threshold,
+        policy_collection=domain.policy_collection,
+        retrieval_mode=domain.retrieval_mode,
+        reviewer_guidance=domain.reviewer_guidance,
     )
 
 

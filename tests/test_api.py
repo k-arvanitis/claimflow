@@ -898,3 +898,37 @@ def test_dashboard_summary_endpoint():
         "straight_through_rate",
         "top_validation_failures",
     }
+
+
+def test_list_domain_packs_includes_cms1500():
+    from api.main import app
+
+    with TestClient(app) as client:
+        response = client.get("/domain-packs")
+
+    assert response.status_code == 200
+    keys = {pack["key"] for pack in response.json()}
+    assert "cms1500" in keys
+
+
+def test_get_domain_pack_detail_for_cms1500():
+    from api.main import app
+
+    with TestClient(app) as client:
+        response = client.get("/domain-packs/cms1500")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["display_name"] == "CMS-1500 Health Claim"
+    assert body["retrieval_mode"] == "official_deterministic"
+    assert "confidence_threshold" in body
+    assert "required_fields" in body
+
+
+def test_get_domain_pack_detail_404_for_unknown_key():
+    from api.main import app
+
+    with TestClient(app) as client:
+        response = client.get("/domain-packs/does_not_exist")
+
+    assert response.status_code == 404

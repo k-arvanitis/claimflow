@@ -25,6 +25,8 @@ EXPECTED_ROUTES = {
     ("GET", "/packages/{package_id}/policy-evidence"),
     ("GET", "/packages/{package_id}/audit"),
     ("GET", "/packages/{package_id}/export"),
+    ("GET", "/domain-packs"),
+    ("GET", "/domain-packs/{key}"),
 }
 
 
