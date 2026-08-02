@@ -91,8 +91,8 @@ current work, not forgotten.
 
 ## Auth / RBAC
 
-No authentication or authorization anywhere — the FastAPI API and Streamlit
-UI are both open. Needed before any real deployment: user accounts, role
+No authentication or authorization anywhere — the FastAPI API and the
+frontend are both open. Needed before any real deployment: user accounts, role
 separation (reviewer vs admin), and auth on `/packages` endpoints.
 
 ## VLM path (signature / checkbox / photo verification)
@@ -111,19 +111,14 @@ encryption at rest, a retention/deletion policy for PII-bearing documents
 (patient names, SSNs, account numbers), and probably a move off local disk
 to object storage with access controls.
 
-## Health source-evidence accuracy (~85%) — root cause unverified live
+## Health source-evidence accuracy — measured (2026-08-02), was 85%, now 92.6%
 
-Code-level read of doc-intel's evidence matcher (`find_evidence`/
-`text_grounding` in `confidence.py`, plus `inputs/pdf.py`'s table-skip
-fallback) points at CMS-1500's dense form layout: after the outer form-grid
-table is skipped (>80% page area), fitz's font/paragraph-based block
-clustering isn't cell-grid-aware, so there's no structural signal
-separating a field's label from its value slot. Plausible, matches the
-existing README hypothesis, but never confirmed against a live extraction
-run — attempted twice, vLLM (Qwen3-32B-AWQ on :8005) OOM'd both times and a
-root-owned LightOnOCR process kept auto-respawning and competing for
-GPU/disk. Needs: get vLLM stable, capture real `extraction_fields` with
-`evidence=null` for a few health packages, inspect actual failed matches.
+A full clean `make eval` run (post the extraction/evidence fixes below)
+measured this directly rather than hypothesizing: 92.6% for health vs.
+95.5–98.9% for property/loan. The gap is real but smaller than the old
+~85% estimate suggested — CMS-1500's dense form layout (values split across
+adjacent sub-boxes, e.g. date of birth as separate MM/DD/YY cells) still
+plausibly explains the residual gap, but this is no longer unverified.
 
 ## Domain-pack refactor — DONE (2026-07-27)
 
@@ -135,3 +130,104 @@ merged. Frontend inspector panel (originally planned) was skipped by request
 — no admin UI exists for domain packs yet, inspection is API-only. Editing a
 domain pack still means editing the Python module that registers it; no
 schema editor or rule-language interpreter was added, by design.
+
+## Workflow authority, decision-model split, BYOK LLM settings — DONE (2026-07-27, uncommitted)
+
+Selected workflow is now authoritative end-to-end (`POST /packages` `domain`
+form field, `ingest_node` never overwrites a caller-supplied domain,
+reprocess carries it forward, mismatch is a warning not a silent override).
+`decisions` rows now distinguish system recommendation from reviewer outcome
+(`source`/`is_override` columns, migration `0009`) and both are surfaced
+separately in the queue, dashboard, and workspace overview. Policy answers
+are now linked to the validation finding they support (`field`/`rule`,
+migration `0008`). New BYOK Settings card (Groq/OpenRouter/OpenAI + model,
+`src/claimflow/llm_credentials.py`). Also fixed live: a Xactimate arithmetic
+false-positive, a stale-panel-after-processing frontend bug, black-on-black
+warning-tone text in three places, and Fields/Validation tab layouts that
+required horizontal scrolling. See PROGRESS.md Session N+11 for full detail.
+**Nothing from this is committed to git yet.**
+
+## Per-document extraction for multi-document packages
+
+A package only runs ONE extraction (against its primary document type); every other
+document in the package is classified but not deep-extracted — no fields, no
+confidence, no evidence for it. `document-list.tsx`'s "Extracted"/"Classified only"
+badge reflects this honestly (reverted 2026-08-02 after a portfolio demo recording
+that briefly overrode it to say "Extracted" on every document — reverted back
+immediately after recording, not left in the live app).
+
+## EOB multi-claim extraction — column/totals mapping is nondeterministic
+
+The claims-list schema change (2026-08-02) fixed claim-boundary detection — the
+LLM no longer mixes values across separate claims on one EOB page. What's still
+unreliable: which of two valid-looking totals rows it pulls `plan_paid` /
+`patient_responsibility` from when a claim has both a top-of-page summary strip
+and its own line-item "Column Totals" row — two runs on the same file produced
+different (both plausible) values. Prompt tuning narrowed but didn't kill this.
+Real fix: a deterministic regex/table-parsing correction pass on the claim's
+Column Totals row, same pattern as CMS-1500's `_correct_cms1500_result` in
+`src/claimflow/nodes/extract.py` — not built, would need real EOB template
+samples to generalize beyond the 2 test documents this was diagnosed against.
+
+## Row-level evidence is per-row, not per-field-within-row
+
+For `list[Model]` schema fields (`service_lines`, `claims`), doc-intel computes
+ONE evidence match per row by concatenating all the row's field values into a
+single fuzzy-match string — there's no per-field bbox inside a row. On a row
+with several distinct dollar amounts spread across a wide table, the combined
+string often only partially matches one OCR block (e.g. just the provider name),
+so the highlight can look unrelated to whatever field you're actually
+inspecting, or come back null entirely. This is doc-intel's row-scoring design
+(`src/doc_intel/confidence.py`'s `score()`), not a bug — flagging as a possible
+future improvement (per-field-within-row evidence lookup) if it matters enough
+to justify the added matching complexity.
+
+## Qdrant policy collection repeatedly empties itself
+
+`claimflow_policies` has gone empty (0 collections) at least 4 times across two
+sessions, with no application code found anywhere that calls
+`delete_collection` — looks external to the app (a scheduled job on the shared
+box touching Docker volumes is the leading unconfirmed guess). Never root-caused,
+worked around operationally: `curl localhost:6339/collections` before any
+policy-retrieval demo, reseed with `uv run python scripts/seed_qdrant.py` if
+empty. Worth investigating if it keeps recurring — check for cron jobs, Docker
+volume prune schedules, or another process/container using the same Qdrant
+instance.
+
+Real fix: run extraction per document (or at least for every document whose
+doc_type has its own registered domain pack — EOB already proved this works
+standalone with the multi-claim fix), not once per package. Until that lands,
+revert `document-list.tsx`'s badge to the real check — search for the
+`ponytail: demo override` comment there.
+
+## Still open after Session N+11
+
+- **Commit the session's work.** Large uncommitted diff across backend,
+  frontend, migrations, tests — needs to land before anything else builds on
+  top of it.
+- **Confidence-signal exposure in the UI.** The Fields tab shows a single
+  confidence percentage; the underlying grounding/validation/presence signal
+  breakdown (doc-intel's `confidence.py`) is not surfaced per-field. Real
+  data exists (`grounded`, `valid`, `field_status`, `evidence.grounding_score`
+  when present) but there's no popover/tooltip exposing it — verify
+  `grounding_score` is actually populated before building UI around it, per
+  the earlier live check where CMS-1500 evidence bboxes came back null on
+  some fields.
+- **No recommendation-version tracking.** A reviewer override records
+  `is_override` and the reason, but not which specific system-recommendation
+  run it responded to (no `responds_to_decision_id`/version link). Fine for
+  a single-recommendation-per-run model; would matter if a package can be
+  reprocessed and reviewed against a stale recommendation.
+- **Dashboard "Recently processed packages" dropped its Confidence column**
+  to fit the new System rec./Reviewer outcome split without horizontal
+  overflow. Confidence is one click away (package workspace) but no longer
+  visible at a glance from the dashboard.
+- **Mismatch UX is warn-only, not reprocess-assisted.** When a selected
+  workflow doesn't match the detected domain, the user sees a warning and
+  must manually create a new package under the correct workflow — there's no
+  in-place "reprocess under a different workflow" action yet.
+- **Extraction misassignment spot-check was a one-time manual sample.** One
+  real CMS-1500 misassignment (adjacent-box value copied at high confidence)
+  was found and did not reproduce on 2 more samples — treated as inherent
+  LLM noise in the doc-intel dependency, not chased further. No systematic
+  eval added to catch this failure class going forward.

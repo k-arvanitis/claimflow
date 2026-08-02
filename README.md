@@ -100,7 +100,7 @@ Every extracted field carries where it came from, not just its value:
 }
 ```
 
-`bbox` is populated for born-digital pages (from PDF layout) and for most OCR'd pages (from OCR element coordinates); it's `null` when a page has no recoverable coordinates. The Streamlit review UI renders the source page with the evidence region highlighted, so a reviewer can check a value against the original document without opening the PDF separately.
+`bbox` is populated for born-digital pages (from PDF layout) and for most OCR'd pages (from OCR element coordinates); it's `null` when a page has no recoverable coordinates. The review UI renders the source page with the evidence region highlighted, so a reviewer can check a value against the original document without opening the PDF separately.
 
 ## OCR proof
 
@@ -116,7 +116,14 @@ The operator-facing product interface — App Router, TypeScript, Tailwind, shad
 
 **Routes:** `/dashboard`, `/packages`, `/packages/new`, `/reviews`, `/packages/[packageId]` (the package workspace), `/settings`.
 
-**Package workspace** (`/packages/[packageId]`) is the primary screen: a resizable three-pane layout — document list, original-page viewer with server-rendered bbox evidence highlighting, and a tabbed review panel (Overview / Fields / Validation / Policy evidence / Audit). Selecting a field opens its source document at the right page with the evidence region highlighted; scalar and nested (`service_lines`/`line_items`) fields both support approve/edit/reject; re-running validation calls the same endpoint the Streamlit prototype uses — no validation logic is duplicated in the frontend. On tablet/mobile the document list moves into a Sheet and the viewer/tabs stack vertically instead of resizing side by side.
+**Package workspace** (`/packages/[packageId]`) is the primary screen: a resizable three-pane layout — document list, original-page viewer with server-rendered bbox evidence highlighting, and a tabbed review panel (Overview / Fields / Validation / Policy evidence / Audit). Selecting a field opens its source document at the right page with the evidence region highlighted; scalar and nested (`service_lines`/`line_items`) fields both support approve/edit/reject, including:
+- Per-field **approve / edit / reject**, with an editable corrected value
+- **Nested fields are editable.** List-of-object fields such as `service_lines` and `line_items` support row-level add, edit and delete actions, with stable row identity and row-specific confidence/evidence. Flat scalar lists such as `diagnosis_codes` are also editable as a list, but currently retain field-level confidence and evidence rather than independent confidence/evidence per code.
+- **Suggested correction** — surfaces the deterministic validator's own failure reason next to the field it flagged (e.g. "line sum $412.00 does not match total charge $450.00")
+- **Re-run validation** — after edits, re-runs the domain's real deterministic validator against the reviewer's corrected values, not a reimplementation; no validation logic is duplicated in the frontend
+- **Export** — reviewed fields, scalar and nested/list alike (original value, action taken, final value, confidence) download as JSON, ready for downstream handoff
+
+On tablet/mobile the document list moves into a Sheet and the viewer/tabs stack vertically instead of resizing side by side.
 
 **Run it:**
 ```bash
@@ -125,16 +132,7 @@ npm install
 cp .env.local.example .env.local   # NEXT_PUBLIC_API_BASE_URL, defaults to localhost:8010
 npm run dev                        # http://localhost:3000 (or next free port)
 ```
-Requires the FastAPI backend running (`make api`) and reachable at that URL.
-
-**Streamlit** (`streamlit_app.py`) remains a functional review prototype used to validate workflow behavior during backend development, not the product interface — the Next.js app above is. Streamlit still exercises the same endpoints and is useful for quick backend smoke-testing, but new review-workflow features land in `frontend/` going forward.
-
-Streamlit's own review queue still offers, for reference:
-- Per-field **approve / edit / reject**, with an editable corrected value
-- **Nested fields are editable.** List-of-object fields such as `service_lines` and `line_items` support row-level add, edit and delete actions, with stable row identity and row-specific confidence/evidence. Flat scalar lists such as `diagnosis_codes` are also editable as a list, but currently retain field-level confidence and evidence rather than independent confidence/evidence per code.
-- **Suggested correction** — surfaces the deterministic validator's own failure reason next to the field it flagged (e.g. "line sum $412.00 does not match total charge $450.00")
-- **Re-run validation** — after edits, re-runs the domain's real deterministic validator against the reviewer's corrected values, not a reimplementation
-- **Export** — reviewed fields, scalar and nested/list alike (original value, action taken, final value, confidence) download as JSON, ready for downstream handoff
+Requires the FastAPI backend running (`make api`) and reachable at that URL. This is the only UI — there is no separate reviewer prototype to run alongside it.
 
 ## Validation rules
 
@@ -255,18 +253,41 @@ make seed
 # 5. (Optional) Generate synthetic claim packages for eval
 make generate
 
-# 6. Start the API
+# 6. Start the API, then the frontend (see Product UI above for full setup)
 make api
-# or the Streamlit UI:
-make ui
+make frontend
 ```
+
+## Docker
+
+The API ships as a standalone container (`Dockerfile`, repo root). `doc-intel`
+is a sibling, editable-install dependency (`pyproject.toml`'s
+`[tool.uv.sources]`) — pass it in as a named build context rather than
+nesting the repos. `data/lookups/` (ICD-10/CPT validator CSVs, ~8MB) isn't
+checked into git — fetch it once before building:
+
+```bash
+uv run python scripts/download_lookups.py
+docker build --build-context doc-intel=../doc-intel -t claimflow .
+docker run -p 8010:8010 \
+  -e ANTHROPIC_API_KEY=... \
+  -e QDRANT_URL=http://host.docker.internal:6339 \
+  claimflow
+```
+
+Migrations run automatically on startup (`db.init_db()` → `alembic upgrade
+head`). Qdrant still runs separately (`make docker-up`) — point `QDRANT_URL`
+at it. The image only bundles what the app reads from disk at runtime
+(`alembic/`, `data/lookups/` — ICD-10/CPT validators, `data/policies/` — the
+Policies page and reindexing); `data/synthetic/` and `data/real_public/`
+(eval fixtures) are intentionally left out to keep the image lean.
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
 | `make api` | Start FastAPI on port 8010 |
-| `make ui` | Start Streamlit review UI on port 8011 |
+| `make frontend` | Start the Next.js product UI (`frontend/`) |
 | `make test` | Run test suite |
 | `make lint` | ruff check + format check |
 | `make eval` | Run 3-domain eval against `data/synthetic/` |
@@ -425,6 +446,12 @@ Key settings:
 | `ESCALATION_THRESHOLD` | `0.50` | Below this → `blocked_or_incomplete` |
 | `LANGFUSE_ENABLED` | `false` | Set `true` to enable tracing |
 
+The routing decision (`src/claimflow/nodes/review.py`) is computed in this order, and it's the first branch that matches which decides:
+
+1. Extraction failed outright, or overall confidence is below `ESCALATION_THRESHOLD` (default 50%) → `blocked_or_incomplete`.
+2. Otherwise, `needs_review` fires if **either** condition holds — at least one deterministic validation failure exists (missing/invalid field, bad format, arithmetic mismatch, etc.), **or** overall confidence is below `CONFIDENCE_THRESHOLD` (default 75%). Either one alone is enough; they don't need to co-occur.
+3. Only clears to `ready_for_processing` when there are zero validation failures **and** confidence is at or above `CONFIDENCE_THRESHOLD`.
+
 ## Tests
 
 Verification runs at three distinct layers, and the numbers below shouldn't be read as interchangeable: **mocked-unit** (`tests/`, `doc-intel` mocked — fast, deterministic, runs in CI on every change), **local-integration** (`e2e-smoke.mjs`, `make eval-real-public` — real backend/DB/Qdrant, real HTTP, but synthetic or public fixture data), and **live-model** (`make eval` — a real self-hosted LLM in the loop, the only layer that measures actual extraction/grounding accuracy against a model).
@@ -457,13 +484,13 @@ make eval
 uv run python scripts/run_eval.py --domain health
 ```
 
-Results are written to `output/eval_results.json`. Model: `qwen3-32b`, self-hosted via vLLM (AWQ-quantized), `max_num_seqs=1`.
+Results are written to `output/eval_results.json`. Model: `qwen3-32b` (this run via OpenRouter; also runs self-hosted via vLLM, AWQ-quantized, `max_num_seqs=1`).
 
-| Domain | Packages | Field accuracy | Validation catch rate | False positive rate | Source evidence accuracy | Straight-through |
-|--------|---------|---------------|------------------------|----------------------|---------------------------|-------------------|
-| Health (CMS-1500) | 30 | ~92% | ~81.5% | 0.0% | ~85% | ~40-43% |
-| Property (Xactimate) | 30 | 98.1% | 100.0% | 0.0% | 100.0% | 40.0% |
-| Loan (SBA) | 30 | 96.7% | 100.0% | 0.0% | 93.8% | 30.0% |
+| Domain | Packages | Field accuracy | Validation catch rate | False positive rate | Source evidence accuracy | Straight-through | Citation rate |
+|--------|---------|---------------|------------------------|----------------------|---------------------------|-------------------|----------------|
+| Health (CMS-1500) | 30 | 98.8% | 88.9% | 0.0% | 92.6% | 40.0% | 100.0% |
+| Property (Xactimate) | 30 | 99.6% | 81.0% | 0.0% | 98.9% | 53.3% | 100.0% |
+| Loan (SBA) | 30 | 98.0% | 96.3% | 0.0% | 95.5% | 33.3% | 100.0% |
 
 Field accuracy by type (date / code / currency / text) and the scanned-vs-born-digital split are in `output/eval_results.json` — all synthetic packages in this run were born-digital, so that split isn't informative yet.
 
@@ -527,13 +554,13 @@ Every downloaded artifact is tracked in `eval/real_public/manifest.json` — sou
 - **This refactor added no schema editor or rule-language interpreter.** Domain-pack inspection (`GET /domain-packs`, `GET /domain-packs/{key}`) is read-only; defining a new domain, validator, or extraction hook still means editing the Python module that registers it (see [DomainPack](#domainpack-how-a-domain-is-configured)) — explicitly out of scope for this work, not a gap that snuck in.
 - **No real private claim-package evaluation yet.** The controlled end-to-end package eval uses synthetic generated packages with gold-labeled injected errors. The real/public eval layer uses public structured datasets, official blank templates, and a small number of public estimate PDFs for validation realism and selected extraction case studies — not private patient, claimant, or borrower packages.
 - **No production HIPAA compliance.** ClaimFlow records application-level workflow audit events (`GET /packages/{id}/audit`), but does not yet provide compliance-grade, tamper-evident audit logging, PHI-specific access auditing, encryption at rest, or a retention policy — don't point this at real patient/claimant data as-is.
-- **No production auth/RBAC.** The API and Streamlit UI have no authentication — anyone who can reach the port can submit and review claims.
+- **No production auth/RBAC.** The API and frontend have no authentication — anyone who can reach the port can submit and review claims.
 - **MedCaseFlow is not implemented.** Medical/legal case-file intelligence (timeline reconstruction, contradiction detection, missing-evidence detection) is a separate, not-yet-built idea.
 - **Scan quality is a heuristic, not real OCR confidence** — a character-density proxy computed by ClaimFlow over the text doc-intel returns; the currently used OCR path may not expose reliable per-word confidence (see [OCR proof](#ocr-proof)).
 - **`diagnosis_codes` (a flat string list) has no per-item confidence/evidence** — doc-intel only scores list-of-object fields per row, so a scalar list is scored once, as a whole. `service_lines` and `line_items` (list-of-object fields) DO get independent per-row confidence, evidence, and review actions with stable row identity — see [Product UI](#product-ui-nextjs).
 - **Field accuracy is exact-match**, normalized for dates/currency but not names/addresses — minor OCR spelling variance counts as wrong even if a human reviewer would accept it.
 - **Blank-field hallucination risk.** A model can fabricate a value for a blank field even when the schema allows null and the prompt says not to guess. Deterministic pattern checks catch this for `tax_id`, `applicant_name`, `billing_provider_npi`, and `claim_number` — generalizable, real-world rules, not synthetic-data hacks. `insurance_id` is mitigated by making the field nullable. `signature_on_file` remains unresolved — it's fundamentally a visual question, and needs vision-based verification, not another prompt tweak.
-- **Health source-evidence accuracy (~85%) is lower than property/loan (~96–100%)** due to CMS-1500's dense form layout — values are often split across adjacent sub-boxes (e.g. date of birth as separate MM/DD/YY cells), which can push fuzzy-match grounding below threshold even when the extracted value itself is correct.
+- **Health source-evidence accuracy (92.6%) is still a bit lower than property/loan (95.5–98.9%)** due to CMS-1500's dense form layout — values are often split across adjacent sub-boxes (e.g. date of birth as separate MM/DD/YY cells), which can push fuzzy-match grounding below threshold even when the extracted value itself is correct.
 - **`temperature=0` doesn't guarantee bit-exact reproducibility.** Verified directly — the identical package, through identical code, produced a correctly-null `insurance_id` in some runs and a fabricated one in others. Identical requests can still produce small run-to-run variations despite `temperature=0.0`. The observed behavior is consistent with nondeterminism in the model-serving stack, although ClaimFlow mitigates its effects through deterministic validation and review routing.
 
 ### Production hardening still required
@@ -550,6 +577,6 @@ Before using ClaimFlow with real regulated data, the following are required:
 
 ## Tech stack
 
-Python 3.13 · LangGraph · FastAPI · Streamlit · Qdrant · sentence-transformers · PyMuPDF · pydantic-settings · doc-intel (editable dep)
+Python 3.13 · LangGraph · FastAPI · Next.js · shadcn/ui · Qdrant · sentence-transformers · PyMuPDF · pydantic-settings · doc-intel (editable dep)
 
 Frontend: Next.js (App Router) · TypeScript · Tailwind CSS · shadcn/ui · TanStack Query · openapi-typescript/openapi-fetch · Vitest + React Testing Library

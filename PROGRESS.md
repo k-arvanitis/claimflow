@@ -857,3 +857,370 @@ declarations page.
 
 No validator, schema, persistence, or UI code was changed during this
 research-only audit.
+
+## Session N+10: DomainPack refactor, safe routing labels, Streamlit removed (DONE — 2026-07-27)
+
+Formalized the `Domain` registry into a real DomainPack: added `display_name`,
+`policy_collection`, `retrieval_mode`, `question_templates`, `extraction_hook`/
+`extract_fn`, per-domain thresholds, `reviewer_guidance` to `domains/base.py`,
+and drove `extract_node`/`retrieve_node` from those fields instead of
+hardcoded `domain_key == "..."` branches. Validation failures now carry
+`severity` and `policy_required`; policy retrieval only fires for failures
+with a real citable answer (a data migration, `0006`). Decision vocabulary
+renamed system-wide: `approved`/`flagged`/`escalated` →
+`ready_for_processing`/`needs_review`/`blocked_or_incomplete` (data migration
+`0007`) — a recommendation, not a final decision. Added read-only
+`GET /domain-packs`/`GET /domain-packs/{key}` inspector endpoints. A frontend
+domain-pack panel was scoped but skipped by request.
+
+Removed `streamlit_app.py` and the `streamlit` dependency entirely — the
+Next.js app in `frontend/` (already shadcn/ui-based) is now the only UI.
+`make ui` replaced with `make frontend`. Verified the full core flow live in
+a real browser against the running backend (dashboard, package list, package
+workspace — fields/validation/policy-evidence/audit tabs — settings), after
+fixing a CORS-allowlist gap that only allowed `localhost:3000`/`3001` while
+the dev server had landed on `3002`.
+
+## Session N+11: workflow-selection authority, decision-model split, BYOK LLM settings, UI compactness (DONE — 2026-07-27, uncommitted)
+
+### Domain-selection authority (backend correctness fix)
+
+The `/packages/new` workflow-selection UI added in Session N+10's follow-up
+was cosmetic only — the selected workflow was never sent to the backend, so
+content classification silently drove processing regardless of what the user
+picked. Fixed for real: `POST /packages` accepts an optional `domain` form
+field; `ingest_node` now treats a caller-supplied domain as authoritative and
+never overwrites it with content classification, instead emitting
+`detected_domain` + `domain_mismatch` as separate, informational fields.
+Reprocessing (`POST /packages/{id}/process`) now carries the previously
+resolved domain forward by reading it out of the stored result, so a
+reprocess doesn't silently fall back to auto-detection. `extract_node`'s
+"no matching document" error now names the detected domain too, when
+different, so a mismatch produces an actionable error instead of a bare
+"no cms1500 document found". Frontend sends the selection, and the
+"detected workflow differs" banner now reads the real
+`domain_mismatch`/`detected_domain` fields instead of comparing client state
+to the backend's already-resolved `domain`.
+
+### Decision-model: system recommendation vs. reviewer outcome, tracked separately
+
+`decisions` rows previously had no way to distinguish a system-computed
+recommendation (written by validation re-runs) from a reviewer's own
+submission (written by `POST /packages/{id}/decision`) — both landed in the
+same table with the same shape, so "was this overridden" was unqueryable.
+Added `source` (`system`|`reviewer`) and `is_override` columns (migration
+`0009`); `package_read_model` now exposes `system_recommendation`,
+`reviewer_outcome`, and `reviewer_override` as distinct fields alongside the
+existing conflated `decision` (kept for backward-compatible filtering/sort).
+Wired through: the packages queue and dashboard's "recently processed"
+table show both columns with an `(override)` tag; the workspace Overview tab
+shows both as separate stat tiles.
+
+### Policy-evidence linked to the finding it supports
+
+`PolicyAnswer`/`PolicyEvidence` gained `field`/`rule` (migration `0008`), so
+each cited policy answer now visibly states "Supports validation finding:
+`net_income` (`income_consistency`)" instead of being a flat, disconnected
+list of Q&A cards.
+
+### Bugs found and fixed via live browser verification (not just unit tests)
+
+- **Xactimate false-positive arithmetic failure**: `property.py`'s RCV
+  reconciliation check treated a package with no extracted line items, no
+  printed line-item subtotal, and no overhead/profit/tax as `$0`, then
+  flagged every such estimate as an arithmetic mismatch against RCV. Fixed:
+  skip the check when there's no reconciliation basis at all. Regression
+  test added.
+- **Stale workspace panels after processing finishes**: `usePackage` polls
+  itself while a package is processing, but `useDocuments`/review/audit/
+  policy are separate queries fetched once on mount — after processing
+  completed, the document list and other panels stayed empty until a manual
+  page reload. Fixed with a status-transition effect that invalidates the
+  related queries once `status` changes.
+- **Extraction spot-check across 5 real samples, 3 domains**: one CMS-1500
+  field misassignment (a blank phone box got the adjacent ZIP value, at
+  100% confidence) didn't reproduce on 2 more samples — inherent LLM
+  extraction noise in the doc-intel dependency, not a ClaimFlow code bug,
+  left as a known limitation. A separate Xactimate `date_of_loss` miss was
+  correctly self-reported at 30% confidence — the system behaving as
+  designed.
+
+### BYOK LLM provider settings (ported from vault-rag)
+
+New Settings card: pick Groq, OpenRouter, or OpenAI (plus an optional model),
+save/clear, takes effect immediately with no restart. `src/claimflow/
+llm_credentials.py` is a JSON-file-backed override (plaintext, gitignored,
+same trust model as `.env`) wired into both `retrieve.py`'s policy-synthesis
+LLM client and doc-intel's extraction LLM — doc-intel reads its
+provider/model/key/base-url from plain module globals with no reconfiguration
+hook, so the override mutates those globals at runtime and restores the
+captured originals on clear. `GET/POST/DELETE /llm-credentials`, no auth
+(matches this app's existing no-auth pattern).
+
+### UI compactness and contrast fixes (demo-readiness pass)
+
+Live browser verification surfaced real usability bugs beyond what unit
+tests or a code read would catch:
+- **Black-on-black text**: the `warning` tone's `TONE_CLASS` paired
+  `text-warning-foreground` (a dark color meant only for the *solid* warning
+  background) with a translucent `bg-warning/20` background — rendered as
+  near-invisible dark-on-dark in dark mode. Same bug independently present in
+  `metric-card.tsx`'s dashboard tiles and `package-header.tsx`'s "Needs
+  review" button (neither goes through `status.tsx`). All three fixed to use
+  `text-warning` directly.
+- **Fields tab required horizontal scroll**: merged 7 columns down to 4
+  (Field/Value/Signal/Actions), then — after a first attempt that only
+  widened the workspace's default panel split (screen-size-dependent, so it
+  didn't hold on a real laptop window) — switched to a `table-fixed` layout
+  with fixed `%` column widths plus `truncate`/`title` tooltips, so columns
+  never expand past their slot regardless of content length or window size.
+  Same treatment applied to the nested line-item tables and to the
+  Validation tab, which was rewritten from an 8-column table into compact
+  per-failure cards.
+- **Dashboard layout**: "Straight-through rate" was an isolated single card
+  below the metric grid; merged into the 8-tile grid. "Recently processed
+  packages" gained the System rec./Reviewer outcome split (dropped its
+  Confidence column to keep the card from overflowing at 5 columns).
+
+Full backend suite (242 tests) and frontend (tsc/eslint/vitest, 28 tests)
+green throughout. Nothing in this session has been committed to git yet —
+see git status for the full uncommitted diff.
+
+## Session N+12: eval bug chase, PDF-scroll/evidence UX, Docker fix, demo prep (DONE — 2026-08-02, uncommitted)
+
+Started from "fire the full eval" and kept pulling threads — each fix
+exposed the next real bug, verified live rather than assumed:
+
+- **Eval 401s were a `python-dotenv` script-vs-import discovery bug.**
+  `doc_intel/config.py`'s bare `load_dotenv()` finds a different `.env`
+  depending on whether the caller is a `-c`/import invocation or a real
+  script — as a script, it walked up from `doc-intel`'s own file location
+  and silently loaded *doc-intel's own* `.env` (a different OpenAI key)
+  instead of claimflow's OpenRouter key. Fixed by running eval via
+  `uv run --env-file .env`, which sets the env var before Python starts so
+  it wins regardless of dotenv's internal resolution.
+- **Property `date_of_loss` was 0/30** — a regex guard in `extract.py`
+  meant to stop estimate-completion dates being substituted for
+  `date_of_loss` required a colon/hash after the label; this synthetic
+  corpus prints "Date of Loss\n07062025" with no colon, so the guard's own
+  detection never matched and it nulled a correctly-extracted value every
+  time.
+- **Property line items were never extracted** — `_xactimate_line_layouts`
+  requires numbered rows ("1.", "2."); this template has none, so the
+  chunker found nothing and the native regex fallback (which also expects
+  numbers) found nothing either. Fixed with a whole-page LLM fallback when
+  no numbered items are found.
+- **ACV auto-override defeated `acv_check` by construction** — `extract.py`
+  always recomputed `actual_cash_value = RCV - depreciation`, overwriting
+  whatever was actually printed, so the validator built to catch a printed
+  ACV that doesn't reconcile could never fire. Now only fills the value
+  when extraction found nothing.
+- **CMS-1500 native/born-digital PDFs skipped the truncation-safe split
+  schema entirely** — `_cms1500_extract_fn`'s split-schema path
+  (`_cms1500_llm_specs`, built specifically so the 76-field schema doesn't
+  hit the model's completion-length ceiling) only ran for the OCR-image
+  branch; native PDFs fell through to one unsplit 76-field call, which then
+  truncated on dense documents (`Max retries exceeded... Invalid JSON`).
+  Fixed to route native PDFs through the split path too — and since that
+  split intentionally excludes `service_lines` (normally filled by an
+  OCR-marker-based deterministic parser that native PDFs never produce),
+  added a dedicated LLM call for `service_lines` on the native-PDF branch
+  specifically, so Box 24 doesn't silently regress to empty.
+- **`find_evidence` picked the wrong block for composite/row values** —
+  three compounding issues, found live via a real service-line-by-service-
+  line inspection: (1) a short leaf value (a line number) could spuriously
+  match an unrelated same-length block anywhere on the page since
+  `partial_ratio` scores a 1-char overlap as ~100%; fixed by refusing to
+  consider a block shorter than the value being matched. (2) Even after
+  that, a row dict's *first* leaf winning (insertion order) meant a row
+  could ground on a weak field instead of a strong one; fixed by matching
+  the row's combined field values as one string first. (3) Sibling rows
+  sharing a field (every service line has the same `date_of_service`)
+  still couldn't be told apart by `find_evidence` alone, since it has no
+  visibility into sibling rows — fixed at the `score()` level instead,
+  where all rows of a list field *are* visible together: each row's
+  evidence lookup is narrowed to just the fields that differ across
+  siblings (`_discriminating_keys`).
+- **`not_found` fields displayed a misleading confidence** — a field with
+  no value gets `confidence ≈ validation_weight` (~30%) as a scoring-
+  formula artifact, not a real signal, but the UI showed it as a plain red
+  percentage next to a correctly-blank field. `ConfidenceBadge` now shows
+  "Not found" for these; `flagged_fields` (the Overview tab's "low-
+  confidence" count) excludes them server-side, and `overview-tab.tsx`
+  independently recomputes the same count client-side and needed the same
+  exclusion applied separately — the earlier backend fix alone hadn't
+  covered it.
+- **Boolean/no-evidence fields offered an evidence button that always
+  failed** — checkboxes ground on presence/absence, not printed text, so
+  `find_evidence` structurally can never return a match; the Fields tab now
+  only shows the evidence icon when `f.evidence != null`, for any field
+  type, not just booleans.
+- **OCR'd image evidence highlighting was completely broken, two separate
+  bugs deep**: (1) `TesseractBackend` (the real-bbox OCR fallback) renders
+  at 300 DPI internally, but the temporary PDF `unstructured` partitions
+  is sized in *points* equal to the pixmap's *pixel* count — so returned
+  bbox coordinates were ~4.17x too large, always falling entirely outside
+  `render_page()`'s page-bounds clamp and getting silently dropped with no
+  error. Fixed by scaling back to the real page's point space. (2) Once
+  bbox became valid, a second bug surfaced that the first had been
+  masking: `page.draw_rect()` requires a real PDF — a page opened directly
+  from a standalone image (a valid upload type) isn't one ("is no PDF"),
+  so every image-sourced package's evidence highlight silently failed.
+  Fixed by wrapping the image in a real one-page PDF before drawing.
+  Also reordered `OCR_FALLBACK_PROVIDERS` to try `tesseract` (real bboxes)
+  before `lighton` (page-level-only, no bbox at all) — evidence
+  traceability matters more here than lighton's better raw OCR accuracy.
+- **PDF viewer required its own tiny internal scroll** — the 3-column
+  workspace layout clipped the document panel to viewport height; now the
+  doc-list and review-tabs columns stay sticky-pinned while the PDF column
+  grows to its natural page height and the whole page scrolls, verified at
+  multiple zoom levels (a first attempt let a zoomed image overflow
+  horizontally into the neighboring column — fixed by clamping horizontal
+  overflow only, not vertical).
+- **The Dockerfile never actually produced a working image** — three
+  compounding bugs, found by actually building and running it rather than
+  reading it: (1) `doc-intel` is a sibling editable dependency not in the
+  build context at all — fixed via a named `--build-context`. (2) copying
+  the *whole* doc-intel tree pulled in its unrelated 9.4GB `.venv` (12.5GB
+  transferred) — fixed by scoping the copy to `pyproject.toml`/`README.md`/
+  `src/`. (3) `alembic.ini`/`alembic/` and the `data/lookups/`
+  (ICD-10/CPT validators) and `data/policies/` directories were never
+  copied at all, so the container crashed on startup before the first
+  request. All fixed; container now builds, migrates, and serves `/health`
+  end to end.
+- **A full clean `make eval` run** (post all of the above) — CMS-1500
+  98.8%, Xactimate 99.6%, SBA 98.0% field accuracy; 0% false-positive rate
+  and 100% citation rate across all three domains. README's eval table
+  updated with these real numbers (was stale at ~92%/98.1%/96.7%).
+
+Full backend suite (doc-intel 277, claimflow 234), frontend (tsc + 31
+vitest tests), production frontend build, and a real Docker build+run all
+green. Nothing in this session has been committed to git yet.
+
+**Open, not chased tonight**: Qdrant's `claimflow_policies` collection
+emptied itself three separate times during this session with no
+application-level call (`delete_collection`/`recreate_collection`) that
+could explain it, and the Docker container never restarted — looks
+external to the app (a scheduled task on this shared box touching Docker
+volumes is the leading guess). Worth a `curl localhost:6339/collections`
+check immediately before recording, and re-seeding
+(`uv run python scripts/seed_qdrant.py`) if it's empty.
+
+## Session N+13: client search/history/export, EOB fixes, repo finalization for demo recording (DONE — 2026-08-02)
+
+**Client-facing features, requested for portfolio positioning:**
+- `packages.client_name`/`client_key` columns (derived, not a full `clients`
+  table — deliberately cheap: search/filter/history don't need identity
+  resolution). Populated per-domain via a new `Domain.client_name_field`
+  (`patient_name`/`insured_name`/`applicant_name`), refreshed on reviewer
+  correction. Migration `0012` backfills existing packages.
+- Search box now matches client name, not just package ID; clicking a
+  client name filters the queue to their history (no new route needed).
+- `GET /packages/export.xlsx` — batch Excel export across every package
+  matching the current filters, one workbook, Package column disambiguates
+  rows across the 5 existing sheets (`excel_export.py` refactored to share
+  row-append logic between single- and batch-export).
+
+**EOB bug chase, three real bugs found by live-testing, not by reading code:**
+- Evidence "hallucinating" on EOB fields traced to `unstructured`'s
+  hi_res layout model occasionally returning a corrupt/oversized bbox for
+  a whole `Table` element — matched text was correct, the highlight box
+  was garbage (extended past the real page). Fixed by dropping malformed
+  bbox at the OCR-backend layer (`doc-intel/ocr_backends.py`) rather than
+  trusting it. Follow-up: switched `TesseractBackend`'s element extraction
+  from `strategy="hi_res"` to `strategy="ocr_only"` — smaller per-line
+  blocks instead of one corrupt merged table, far better evidence
+  granularity on real-world scans.
+- Root design bug: the EOB schema modeled one flat claim per document, but
+  every real EOB sample has 2+ claim blocks per page — extraction was
+  silently mixing fields across claims (`patient_responsibility` from
+  claim A, `claim_number` from claim B). Fixed with a real schema change:
+  `EOB.claims: list[EOBClaim]`, mirroring CMS-1500's `service_lines`
+  pattern; validator rewritten to iterate per claim; prompt rewritten to
+  explicitly describe claim-block boundaries (a first prompt-only attempt
+  overcorrected and split each *line item* into its own fake claim —
+  fixed by explicitly stating a claim block is identified only by its own
+  "Claim:" header). Column/totals-row mapping (which of two valid-looking
+  totals a claim's `plan_paid`/`patient_responsibility` should read from)
+  remains genuinely nondeterministic across LLM runs — documented in
+  TODO.md as needing a deterministic parser, not more prompt tuning.
+
+**UI fixes, mostly demo-recording-driven:**
+- Sidebar real bug: `/packages/new`'s active-link check compared
+  `item.href !== "/packages/new"` (always true, comparing the nav item's
+  own constant href to itself) instead of `pathname !== "/packages/new"` —
+  both "Packages" and "New package" lit up simultaneously.
+- New-package upload page: "Open package workspace" button now stays
+  disabled with a spinner until the package actually finishes processing,
+  instead of dropping the user into an empty workspace immediately after
+  upload.
+- `DecisionBadge` reused the same "Ready for approval" label for both an
+  unreviewed system recommendation and a reviewer's own final approval —
+  added a `resolved` prop so a finalized outcome reads "Approved"/"Blocked"
+  instead of still sounding pending.
+- Document list: click target was only the filename row (small, easy to
+  miss); whole card is now clickable/keyboard-accessible. "Classified
+  only" documents get a visible caption, not just a hover tooltip (a
+  tooltip is unusable on a screen recording).
+- Audit tab: dropped the raw-JSON "Technical details" dump (was collapsed
+  by default but added no value on camera) and the redundant "api" actor
+  tag; kept the one-line human summaries.
+- Policy evidence tab: dropped the redundant question-text subtitle,
+  answer paragraph already restates it; fixed the collapsible chevron to
+  point `>` closed / rotate to `v` only when open (was static).
+- New Settings "Package types" card — expandable per-domain schema browser
+  (required/optional fields, thresholds, retrieval mode) using the
+  existing read-only `/domain-packs` endpoints; primary vs. supporting
+  document types now shown as separate badge groups instead of one long
+  comma string.
+- Renamed "workflow" → "package type" in all `/packages/new` user-facing
+  copy (internal `domain` field/variable names unchanged).
+
+**Repo finalization, ahead of packaging for delivery:**
+- Removed `streamlit_app.py` (legacy UI, already gone from a prior
+  session, confirmed clean).
+- Two `.pyc` files were tracked in git under `src/claimflow/schemas/
+  __pycache__/` — untracked and removed from disk; `__pycache__/` was
+  already gitignored, this was a stale accidental commit.
+- AI-assistant tooling had leaked into git tracking: `.agents/` (22 files,
+  an unrelated skill plugin), `skills-lock.json`, `frontend/CLAUDE.md`,
+  `frontend/AGENTS.md` — none of this is part of the shipped app. Removed
+  from tracking (kept on disk, still functional locally) and added to
+  `.gitignore` (`.claude/`, `.agents/`, `skills-lock.json`, bare
+  `CLAUDE.md`/`AGENTS.md` patterns catch any depth).
+- Moved loose root-level demo/test assets into `data/samples/`
+  (`CMS1500-1-791x1024.png` → `cms1500-sample.png`, `eob-sample.pdf`) —
+  grep-confirmed nothing else referenced the old root paths except
+  `DEMO_NOTES.md`, updated. Deleted `eob-sample.png` (deprecated in-session
+  after live-testing showed the `.pdf` sample behaves better — no code or
+  docs referenced it).
+- `ruff format` had never been run across ~57 files (pre-existing drift,
+  not from this session's edits) — `make lint`'s format-check would have
+  failed on a fresh clone. Ran `ruff check --fix` + `ruff format` across
+  `src/tests/api`; full backend suite re-run after (260 passed, unchanged)
+  to confirm the reformat was cosmetic only.
+- README's Docker section now documents the `data/lookups/` prerequisite
+  (`uv run python scripts/download_lookups.py` — ~8MB, not checked into
+  git) that a fresh clone needs before `docker build` succeeds.
+- The "Extracted" badge demo override from the recording session (every
+  document shown as extracted, for camera-friendliness) was reverted
+  immediately after recording — the live app now shows the honest
+  Extracted/Classified-only distinction again, no code paths quietly
+  overclaiming capability.
+
+**Final verification, real, not assumed:** `ruff check`/`ruff format
+--check` clean; backend suite 260 passed; frontend `tsc --noEmit` clean,
+37 vitest tests passed (+6 new this session), production build clean; a
+genuine `docker build --build-context doc-intel=../doc-intel` from a
+freshly-`download_lookups.py`'d tree, followed by `docker run` + all 12
+alembic migrations running end-to-end + `/health` → 200, then the test
+image/container removed. DEMO_NOTES.md rewritten to match final package
+state (2 curated packages kept, everything else deleted; live-upload
+sequence documented with real file paths). TODO.md carries 4 new
+consolidated entries for what's still known-incomplete (per-document
+extraction, EOB totals nondeterminism, row-vs-field evidence granularity,
+Qdrant self-emptying) — nothing in this list was worked further per
+explicit instruction to clean up now, fix later.
+
+Nothing in this session has been committed to git yet — working tree is
+clean/ready, commit is a separate explicit step.
