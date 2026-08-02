@@ -14,6 +14,7 @@ that predate the API (the original seed set) have no entry there, so
 from __future__ import annotations
 
 import json
+import uuid
 from pathlib import Path
 
 import fitz
@@ -130,16 +131,20 @@ def _chunk(text: str, source: str) -> list[dict]:
 
 def reindex(policies_dir: Path = POLICIES_DIR) -> int:
     """Rebuild the Qdrant collection from every PDF in `policies_dir`. Returns
-    the number of chunks indexed. Full delete-and-rebuild rather than an
-    incremental update — simple and fast enough at this corpus size (a handful
-    of PDFs); revisit if the policy corpus grows into the hundreds of files."""
-    from qdrant_client import QdrantClient
+    the number of chunks indexed.
+
+    Builds the replacement under a fresh physical collection name first, and
+    only repoints `settings.qdrant_collection` (an alias, not a real
+    collection — see below) once the replacement is fully built. The
+    previous version of this function deleted the real collection up front
+    and rebuilt in place; any exception during embedding/upsert (e.g. a
+    network hiccup fetching the embedding model) left the app's policy
+    corpus permanently empty until the next successful run, which is exactly
+    what kept happening. The alias swap is a single atomic Qdrant call — the
+    alias always resolves to a complete collection, never a missing one."""
+    from qdrant_client import QdrantClient, models
 
     client = QdrantClient(url=settings.qdrant_url)
-
-    collections = {c.name for c in client.get_collections().collections}
-    if settings.qdrant_collection in collections:
-        client.delete_collection(settings.qdrant_collection)
 
     pdfs = list(policies_dir.glob("*.pdf"))
     if not pdfs:
@@ -158,15 +163,50 @@ def reindex(policies_dir: Path = POLICIES_DIR) -> int:
     if not all_chunks:
         return 0
 
+    existing = {c.name for c in client.get_collections().collections}
+    aliases = {a.alias_name: a.collection_name for a in client.get_aliases().aliases}
+
+    staging_name = f"{settings.qdrant_collection}__build_{uuid.uuid4().hex[:8]}"
+
     # No manual create_collection — client.add()/client.query() (FastEmbed's managed
     # API, also used in retrieve.py) auto-creates the collection with the named-vector
     # schema they expect. A manually created unnamed-vector collection is incompatible.
     client.add(
-        collection_name=settings.qdrant_collection,
+        collection_name=staging_name,
         documents=[c["text"] for c in all_chunks],
         metadata=[
             {"source": c["source"], "domain": c["domain"], "authority": c["authority"]}
             for c in all_chunks
         ],
     )
+
+    old_target = aliases.get(settings.qdrant_collection)
+    if old_target is None and settings.qdrant_collection in existing:
+        # One-time migration: a real collection (not an alias) already has the
+        # target name from before this function used aliases. A real collection
+        # and an alias can't share a name — Qdrant rejects the CreateAlias call
+        # below with a 409 otherwise — so clear it first. Safe to do here (after
+        # the replacement is already built above) since the build already
+        # succeeded by this point.
+        client.delete_collection(settings.qdrant_collection)
+
+    ops: list = []
+    if old_target:
+        ops.append(
+            models.DeleteAliasOperation(
+                delete_alias=models.DeleteAlias(alias_name=settings.qdrant_collection)
+            )
+        )
+    ops.append(
+        models.CreateAliasOperation(
+            create_alias=models.CreateAlias(
+                collection_name=staging_name, alias_name=settings.qdrant_collection
+            )
+        )
+    )
+    client.update_collection_aliases(change_aliases_operations=ops)
+
+    if old_target:
+        client.delete_collection(old_target)
+
     return len(all_chunks)

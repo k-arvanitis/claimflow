@@ -182,17 +182,26 @@ inspecting, or come back null entirely. This is doc-intel's row-scoring design
 future improvement (per-field-within-row evidence lookup) if it matters enough
 to justify the added matching complexity.
 
-## Qdrant policy collection repeatedly empties itself
+## Qdrant policy collection repeatedly emptying itself — FIXED (2026-08-02)
 
-`claimflow_policies` has gone empty (0 collections) at least 4 times across two
-sessions, with no application code found anywhere that calls
-`delete_collection` — looks external to the app (a scheduled job on the shared
-box touching Docker volumes is the leading unconfirmed guess). Never root-caused,
-worked around operationally: `curl localhost:6339/collections` before any
-policy-retrieval demo, reseed with `uv run python scripts/seed_qdrant.py` if
-empty. Worth investigating if it keeps recurring — check for cron jobs, Docker
-volume prune schedules, or another process/container using the same Qdrant
-instance.
+Root-caused, not external: `policy_index.reindex()` deleted the live
+`claimflow_policies` collection first, then rebuilt it in place. Confirmed
+directly in the Qdrant container's own request log — `DELETE
+/collections/claimflow_policies` followed by nothing, no rebuild, 4 of the
+last 5 times it ran. Anything failing between delete and rebuild (an
+embedding-model fetch hiccup, any exception) left the collection permanently
+empty until the next successful run.
+
+Fixed by building the replacement under a fresh physical collection name
+first, then atomically repointing `claimflow_policies` — now a Qdrant alias,
+not a real collection — to it via `update_collection_aliases`, only once the
+build is confirmed complete. The real collection is never gone with nothing
+ready to replace it. Verified live: ran `reindex()` twice in a row against
+the real corpus (579 chunks, 5 PDFs), confirmed the alias swap and old-
+generation cleanup both work, confirmed a real retrieval query resolves
+through the alias exactly like a normal collection name (`retrieve.py`
+needed no changes). Regression test added in `test_policy_index.py`
+asserting the build happens before the old collection is ever deleted.
 
 Real fix: run extraction per document (or at least for every document whose
 doc_type has its own registered domain pack — EOB already proved this works

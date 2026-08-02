@@ -131,6 +131,10 @@ On tablet/mobile the document list moves into a Sheet and the viewer/tabs stack 
 |---|---|---|
 | ![Dashboard](assets/dashboard.png) | ![Fields tab with source evidence highlighted on the original document](assets/fields-evidence.png) | ![Validation tab showing deterministic rule failures with policy-required citations linked](assets/validation.png) |
 
+| Packages queue — search, decisions, export |
+|---|
+| ![Packages queue with client-name search, decision outcomes, and Excel export](assets/packages.png) |
+
 A demo video walking through a full package end to end will be added here.
 
 **Run it:**
