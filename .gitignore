@@ -33,3 +33,4 @@ frontend/.next/
 frontend/out/
 frontend/.env.local
 frontend/openapi.json
+UPWORK_PITCH.md
