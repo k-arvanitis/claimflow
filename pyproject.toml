@@ -15,10 +15,10 @@ dependencies = [
     "langfuse>=2.0.0",
     "httpx>=0.28.0",
     "python-multipart>=0.0.32",
-    "streamlit>=1.58.0",
     "rapidfuzz>=3.0.0",
     "sqlalchemy>=2.0.51",
     "alembic>=1.13.0",
+    "openpyxl>=3.1.5",
 ]
 
 [project.optional-dependencies]
@@ -26,10 +26,10 @@ dev = [
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",
     "ruff>=0.8.0",
+    "jsonschema>=4.23.0",
 ]
 eval-real-public = [
     "datasets>=5.0.0",
-    "openpyxl>=3.1.5",
 ]
 
 [tool.uv.sources]

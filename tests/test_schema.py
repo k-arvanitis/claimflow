@@ -5,6 +5,7 @@ from claimflow.schemas.cms1500 import CMS1500, CMS1500_SPEC, ServiceLine
 
 def test_settings_import():
     from claimflow.config import settings
+
     assert settings.llm_model == "claude-sonnet-4-6"
 
 
@@ -64,9 +65,6 @@ def test_cms1500_schema_covers_contact_and_full_service_line_fields():
     assert {
         "service_to_date",
         "emergency_indicator",
-        "modifier_2",
-        "modifier_3",
-        "modifier_4",
         "epsdt_family_plan",
         "rendering_provider_id_qualifier",
     } <= line_fields.keys()

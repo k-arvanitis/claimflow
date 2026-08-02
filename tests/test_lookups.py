@@ -8,9 +8,10 @@ def test_icd10_valid_code(tmp_path):
 
     with patch("claimflow.lookups.icd10._CSV_PATH", icd_file):
         from claimflow.lookups.icd10 import _reset, is_valid_icd10
+
         _reset()
         assert is_valid_icd10("J06.9") is True
-        assert is_valid_icd10("J069") is True   # dot-stripped variant
+        assert is_valid_icd10("J069") is True  # dot-stripped variant
         assert is_valid_icd10("XXXXX") is False
 
 
@@ -21,6 +22,7 @@ def test_cpt_valid_code(tmp_path):
 
     with patch("claimflow.lookups.cpt._CSV_PATH", cpt_file):
         from claimflow.lookups.cpt import _reset, is_valid_cpt
+
         _reset()
         assert is_valid_cpt("99213") is True
         assert is_valid_cpt("00000") is False

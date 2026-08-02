@@ -11,6 +11,9 @@ class PolicyEvidenceItem(BaseModel):
     question: str
     answer: str
     citations: list[Any]
+    field: str | None = None
+    rule: str | None = None
+    status: str = "found"
 
 
 class AuditEventItem(BaseModel):

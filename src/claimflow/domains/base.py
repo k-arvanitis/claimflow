@@ -24,6 +24,7 @@ class Domain:
     confidence_threshold: float | None = None
     escalation_threshold: float | None = None
     reviewer_guidance: str = ""
+    client_name_field: str | None = None
 
 
 _REGISTRY: dict[str, Domain] = {}

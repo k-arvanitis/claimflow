@@ -45,12 +45,28 @@ if settings.openai_api_key.get_secret_value():
 if settings.anthropic_api_key.get_secret_value():
     _doc_intel_config.ANTHROPIC_API_KEY = settings.anthropic_api_key.get_secret_value()
 
+# lighton (a common fallback when the default paddleocr_vl isn't installed) gives one
+# page-level markdown block with no bbox at all, by design — every field extracted from
+# a lighton-OCR'd page loses source-evidence highlighting entirely, which defeats this
+# product's core value. tesseract gives real word/element-level bboxes at a real but
+# smaller accuracy cost; for this product, evidence traceability outweighs that.
+if (
+    _doc_intel_config.OCR_FALLBACK_PROVIDERS
+    and "lighton" in _doc_intel_config.OCR_FALLBACK_PROVIDERS
+):
+    _doc_intel_config.OCR_FALLBACK_PROVIDERS = [
+        p for p in _doc_intel_config.OCR_FALLBACK_PROVIDERS if p != "lighton"
+    ] + ["lighton"]
+    if "tesseract" not in _doc_intel_config.OCR_FALLBACK_PROVIDERS:
+        _doc_intel_config.OCR_FALLBACK_PROVIDERS.insert(0, "tesseract")
+
 from claimflow.state import ClaimState  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
 _CMS1500_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".tiff", ".bmp"}
 _CMS1500_LLM_SPECS: tuple[SchemaSpec, SchemaSpec] | None = None
+_CMS1500_SERVICE_LINES_LLM_SPEC: SchemaSpec | None = None
 _XACTIMATE_LLM_SPECS: tuple[SchemaSpec, SchemaSpec] | None = None
 _CMS1500_REGIONS = (
     ("patient and insured", 0.000, 1.000, 0.068, 0.508),
@@ -108,6 +124,42 @@ def _cms1500_llm_specs(spec: SchemaSpec) -> tuple[SchemaSpec, SchemaSpec]:
         )
     _CMS1500_LLM_SPECS = (llm_specs[0], llm_specs[1])
     return _CMS1500_LLM_SPECS
+
+
+def _cms1500_service_lines_llm_spec(spec: SchemaSpec) -> SchemaSpec:
+    """Box 24 service lines, extracted by the LLM directly.
+
+    Only used for native/born-digital PDFs, which skip OCR entirely and so never
+    produce the region markers _cms1500_service_lines() depends on to parse Box 24
+    deterministically. Kept as its own call (rather than folded into one of the two
+    split scalar schemas) so it doesn't reintroduce the truncation risk the split
+    was built to avoid.
+    """
+    global _CMS1500_SERVICE_LINES_LLM_SPEC
+    if _CMS1500_SERVICE_LINES_LLM_SPEC is not None:
+        return _CMS1500_SERVICE_LINES_LLM_SPEC
+
+    field = spec.model.model_fields["service_lines"]
+    model = create_model(
+        "CMS1500ServiceLines",
+        __base__=BaseExtraction,
+        service_lines=(field.annotation, deepcopy(field)),
+    )
+    _CMS1500_SERVICE_LINES_LLM_SPEC = SchemaSpec(
+        name=spec.name,
+        model=model,
+        system_prompt=(
+            f"{spec.system_prompt} Extract only Box 24's service line rows; no other fields."
+        ),
+        validators={
+            name: validator
+            for name, validator in spec.validators.items()
+            if name == "service_lines"
+        },
+        hints=spec.hints,
+        zero_is_blank_fields=spec.zero_is_blank_fields.intersection({"service_lines"}),
+    )
+    return _CMS1500_SERVICE_LINES_LLM_SPEC
 
 
 def _xactimate_llm_specs(spec: SchemaSpec) -> tuple[SchemaSpec, SchemaSpec]:
@@ -334,10 +386,6 @@ def _cms1500_service_lines(text: str) -> list[dict]:
                 "diagnosis_pointer": cells[14],
                 "charges": charges,
                 "units": units,
-                "modifier": next((cell for cell in cells[10:14] if cell), None),
-                "modifier_2": cells[11] or None,
-                "modifier_3": cells[12] or None,
-                "modifier_4": cells[13] or None,
                 "epsdt_family_plan": cells[17] or None,
                 "rendering_provider_id_qualifier": cells[18] or None,
                 "rendering_provider_npi": cells[19] or None,
@@ -638,8 +686,12 @@ def _correct_cms1500_result(result, regional_text: str) -> None:
             field.value = data["service_lines"][int(match.group(1))]
 
 
-def _extract_cms1500_text(regional_text: str, spec: SchemaSpec):
-    llm_specs = _cms1500_llm_specs(spec)
+def _extract_cms1500_text(
+    regional_text: str, spec: SchemaSpec, *, include_service_lines_via_llm: bool = False
+):
+    llm_specs: tuple[SchemaSpec, ...] = _cms1500_llm_specs(spec)
+    if include_service_lines_via_llm:
+        llm_specs = (*llm_specs, _cms1500_service_lines_llm_spec(spec))
     with ThreadPoolExecutor(max_workers=len(llm_specs)) as pool:
         results = list(
             pool.map(
@@ -773,6 +825,12 @@ def _extract_xactimate_pages(source: str, spec: SchemaSpec) -> ExtractionResult:
         for page_number in layout.pages()
     ]
     line_layouts = _xactimate_line_layouts(layout)
+    if not line_layouts:
+        # Some Xactimate templates print the line-item table without leading item
+        # numbers, so the numbered-row chunker above finds nothing to split on. Ask
+        # the LLM to read the whole page's table directly instead of skipping line
+        # items entirely.
+        line_layouts = page_layouts
     client = get_client()
 
     jobs = [
@@ -883,9 +941,14 @@ def _extract_xactimate_pages(source: str, spec: SchemaSpec) -> ExtractionResult:
         if depreciation:
             data["depreciation"] = float(depreciation.group(1).replace(",", ""))
     if (
-        data.get("total_replacement_cost") is not None
+        data.get("actual_cash_value") is None
+        and data.get("total_replacement_cost") is not None
         and data.get("depreciation") is not None
     ):
+        # Fallback only — derive ACV when extraction found no printed value. When a
+        # value WAS extracted, keep it as printed: acv_check exists to catch a
+        # printed ACV that doesn't reconcile with RCV minus depreciation, which this
+        # would otherwise silently paper over before validation ever saw it.
         data["actual_cash_value"] = round(
             data["total_replacement_cost"] - data["depreciation"], 2
         )
@@ -913,7 +976,7 @@ def _extract_xactimate_pages(source: str, spec: SchemaSpec) -> ExtractionResult:
     ):
         data["property_address"] = None
     has_loss_date_label = re.search(
-        r"(?:date of loss|loss date)\s*[:#]", layout.full_text, flags=re.IGNORECASE
+        r"date of loss|loss date", layout.full_text, flags=re.IGNORECASE
     )
     has_xactimate_header_date = re.search(
         r"\b\d{1,2}/\d{1,2}/\d{4}\s+Page\s*:",
@@ -1045,6 +1108,15 @@ def _cms1500_extract_fn(source: str, spec: SchemaSpec) -> ExtractionResult:
         regional_text = _cms1500_region_text(path)
         if regional_text:
             return _extract_cms1500_text(regional_text, spec)
+    elif path.suffix.lower() == ".pdf":
+        # Native/born-digital PDFs skip OCR but must still use the split schema —
+        # the full 76-field CMS1500 model in one completion can hit the model's
+        # length ceiling on dense documents, the same truncation risk the split
+        # schema was built to avoid for the OCR path (_cms1500_llm_specs). Box 24
+        # normally comes from the OCR-region-marker parser below, which has no
+        # markers to work with here, so the LLM extracts service_lines directly
+        # instead (include_service_lines_via_llm).
+        return _extract_cms1500_text(source, spec, include_service_lines_via_llm=True)
     return extract(source, spec, classify_doc=True)
 
 
@@ -1073,8 +1145,14 @@ def extract_node(state: ClaimState) -> dict:
         None,
     )
     if claim_doc is None:
+        detected = state.get("detected_domain")
+        hint = (
+            f" (documents appear to be {detected})"
+            if detected and detected != domain_key
+            else ""
+        )
         return {
-            "error": f"No {domain_key} document found in package",
+            "error": f"No {domain_key} document found in package{hint}",
             "extraction_status": "error",
         }
 

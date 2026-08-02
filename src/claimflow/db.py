@@ -1,11 +1,12 @@
-"""SQLite-backed job status + audit log, shared by api/main.py and streamlit_app.py.
+"""SQLite-backed job status + audit log, used by api/main.py.
 NOT encrypted at rest — see TODO.md."""
 
 from __future__ import annotations
 
 import json
+import re
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from sqlalchemy import (
@@ -60,6 +61,8 @@ class Package(Base):
     )  # queued|processing|completed|failed
     result_json: Mapped[str | None] = mapped_column(Text, default=None)
     error: Mapped[str | None] = mapped_column(Text, default=None)
+    client_name: Mapped[str | None] = mapped_column(String, default=None)
+    client_key: Mapped[str | None] = mapped_column(String, default=None, index=True)
 
     documents: Mapped[list["Document"]] = relationship(
         back_populates="package", cascade="all, delete-orphan", passive_deletes=True
@@ -182,6 +185,8 @@ class ValidationFailure(Base):
     reason: Mapped[str] = mapped_column(Text)
     severity: Mapped[str] = mapped_column(String, default="error")
     policy_required: Mapped[bool] = mapped_column(default=False)
+    machine_value: Mapped[str | None] = mapped_column(String, nullable=True)
+    expected_value: Mapped[str | None] = mapped_column(String, nullable=True)
     superseded: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
@@ -202,6 +207,9 @@ class PolicyEvidence(Base):
     question: Mapped[str] = mapped_column(Text)
     answer: Mapped[str] = mapped_column(Text)
     citations_json: Mapped[str] = mapped_column(Text)
+    field: Mapped[str | None] = mapped_column(String, default=None)
+    rule: Mapped[str | None] = mapped_column(String, default=None)
+    status: Mapped[str] = mapped_column(String, default="found")
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
     )
@@ -220,6 +228,8 @@ class Decision(Base):
         String
     )  # ready_for_processing|needs_review|blocked_or_incomplete
     review_reasons_json: Mapped[str] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(String, default="system")  # "system"|"reviewer"
+    is_override: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
     )
@@ -479,6 +489,8 @@ def create_validation_failures(
             reason=f["reason"],
             severity=f.get("severity", "error"),
             policy_required=f.get("policy_required", False),
+            machine_value=f.get("machine_value"),
+            expected_value=f.get("expected_value"),
         )
         for f in failures
     ]
@@ -496,6 +508,9 @@ def create_policy_evidence(
             question=a["question"],
             answer=a["answer"],
             citations_json=json.dumps(a["citations"]),
+            field=a.get("field"),
+            rule=a.get("rule"),
+            status=a.get("status", "found"),
         )
         for a in answers
     ]
@@ -515,6 +530,9 @@ def replace_policy_evidence(
             question=answer["question"],
             answer=answer["answer"],
             citations_json=json.dumps(answer["citations"]),
+            field=answer.get("field"),
+            rule=answer.get("rule"),
+            status=answer.get("status", "found"),
         )
         for answer in answers
     ]
@@ -524,12 +542,20 @@ def replace_policy_evidence(
 
 
 def create_decision(
-    session: Session, package_id: str, decision: str, review_reasons: list[str]
+    session: Session,
+    package_id: str,
+    decision: str,
+    review_reasons: list[str],
+    *,
+    source: str = "system",
+    is_override: bool = False,
 ) -> Decision:
     row = Decision(
         package_id=package_id,
         decision=decision,
         review_reasons_json=json.dumps(review_reasons),
+        source=source,
+        is_override=is_override,
     )
     session.add(row)
     session.commit()
@@ -605,6 +631,27 @@ def record_review_action(
     return row
 
 
+def client_key(name: str | None) -> str | None:
+    """Normalizes a client name for grouping/search: case/punctuation/whitespace
+    only — no fuzzy identity resolution (e.g. "SMITH, SARAH" and "Sarah Smith"
+    stay distinct)."""
+    if not name:
+        return None
+    normalized = re.sub(r"[^a-z0-9]+", " ", name.lower()).strip()
+    return normalized or None
+
+
+def set_package_client_name(
+    session: Session, package_id: str, name: str | None
+) -> None:
+    pkg = session.get(Package, package_id)
+    if pkg is None:
+        return
+    pkg.client_name = name
+    pkg.client_key = client_key(name)
+    session.commit()
+
+
 def persist_extraction_result(session: Session, package_id: str, result: dict) -> None:
     """Fan a ClaimState-shaped result dict out into normalized rows.
 
@@ -634,6 +681,20 @@ def persist_extraction_result(session: Session, package_id: str, result: dict) -
 
     if result.get("extraction_fields"):
         create_extracted_fields(session, run.id, result["extraction_fields"])
+        from claimflow import domains as _domains
+
+        domain_pack = _domains.get(domain) if domain else None
+        if domain_pack and domain_pack.client_name_field:
+            match = next(
+                (
+                    f
+                    for f in result["extraction_fields"]
+                    if f.get("name") == domain_pack.client_name_field
+                ),
+                None,
+            )
+            if match is not None:
+                set_package_client_name(session, package_id, match.get("value"))
     if result.get("validation_failures"):
         create_validation_failures(session, run.id, result["validation_failures"])
     replace_policy_evidence(session, package_id, result.get("policy_answers") or [])
@@ -662,6 +723,7 @@ def list_packages_filtered(
     date_from: datetime | None = None,
     date_to: datetime | None = None,
     search: str | None = None,
+    client_key: str | None = None,
     sort: str = "-created_at",
     page: int = 1,
     page_size: int = 25,
@@ -684,7 +746,12 @@ def list_packages_filtered(
     if date_to is not None:
         query = query.filter(Package.created_at <= date_to)
     if search:
-        query = query.filter(Package.id.ilike(f"%{search}%"))
+        query = query.filter(
+            (Package.id.ilike(f"%{search}%"))
+            | (Package.client_name.ilike(f"%{search}%"))
+        )
+    if client_key:
+        query = query.filter(Package.client_key == client_key)
 
     candidates = query.all()
 
@@ -755,6 +822,8 @@ def package_read_model(session: Session, pkg: Package) -> dict:
     (PackageSummary) — read-only projection, not a new persistence concept."""
     run = latest_extraction_run_for_package(session, pkg.id)
     decision = latest_decision_for_package(session, pkg.id)
+    system_decision = latest_decision_for_package(session, pkg.id, source="system")
+    reviewer_decision = latest_decision_for_package(session, pkg.id, source="reviewer")
     document_count = session.query(Document).filter_by(package_id=pkg.id).count()
     failure_count = (
         len(list_validation_failures_for_run(session, run.id, current_only=True))
@@ -766,9 +835,16 @@ def package_read_model(session: Session, pkg: Package) -> dict:
         "status": pkg.status,
         "created_at": pkg.created_at,
         "updated_at": pkg.updated_at,
+        "client_name": pkg.client_name,
+        "client_key": pkg.client_key,
         "domain": run.schema_name if run else None,
         "decision": decision.decision if decision else None,
         "review_reasons": json.loads(decision.review_reasons_json) if decision else [],
+        "system_recommendation": system_decision.decision if system_decision else None,
+        "reviewer_outcome": reviewer_decision.decision if reviewer_decision else None,
+        "reviewer_override": reviewer_decision.is_override
+        if reviewer_decision
+        else False,
         "overall_confidence": run.overall_confidence if run else None,
         "document_count": document_count,
         "validation_failure_count": failure_count,
@@ -781,7 +857,6 @@ def compute_dashboard_summary(session: Session) -> dict:
     awaiting_review = (
         session.query(Package).filter(Package.status == "review_ready").count()
     )
-    approved = session.query(Package).filter(Package.status == "completed").count()
     processing_errors = (
         session.query(Package)
         .filter(
@@ -792,19 +867,31 @@ def compute_dashboard_summary(session: Session) -> dict:
         .count()
     )
 
+    # A reviewer's "blocked" decision closes the review cycle the same as "ready" does
+    # (status == "completed" for both) — so status alone can no longer tell approved
+    # apart from blocked. Bucket by the latest decision instead.
+    approved = 0
     flagged = 0
     escalated = 0
-    # ponytail: N+1 query, one latest_decision_for_package() call per review_ready
-    # package. Fine for a once-per-page-load dashboard call at portfolio scale;
-    # switch to a single grouped query if review_ready volume grows large.
-    for pkg in session.query(Package).filter(Package.status == "review_ready").all():
+    # ponytail: N+1 query, one latest_decision_for_package() call per completed/
+    # review_ready package. Fine for a once-per-page-load dashboard call at portfolio
+    # scale; switch to a single grouped query if package volume grows large.
+    for pkg in (
+        session.query(Package)
+        .filter(Package.status.in_(("completed", "review_ready")))
+        .all()
+    ):
         latest = latest_decision_for_package(session, pkg.id)
         if latest is None:
+            if pkg.status == "completed":
+                approved += 1
             continue
-        if latest.decision == "needs_review":
-            flagged += 1
-        elif latest.decision == "blocked_or_incomplete":
+        if latest.decision == "blocked_or_incomplete":
             escalated += 1
+        elif latest.decision == "needs_review":
+            flagged += 1
+        else:
+            approved += 1
 
     decided_total = approved + flagged + escalated
     straight_through_rate = (approved / decided_total) if decided_total > 0 else 0.0
@@ -819,6 +906,23 @@ def compute_dashboard_summary(session: Session) -> dict:
         )[:5]
     ]
 
+    # Last 30 days, zero-filled — a bar chart needs the gaps to be visible,
+    # not just the days something happened.
+    window_start = datetime.now(timezone.utc).date() - timedelta(days=29)
+    counts_by_day: dict[str, int] = {}
+    for pkg in session.query(Package).filter(Package.created_at >= window_start).all():
+        key = pkg.created_at.date().isoformat()
+        counts_by_day[key] = counts_by_day.get(key, 0) + 1
+    packages_by_day = [
+        {
+            "date": (window_start + timedelta(days=i)).isoformat(),
+            "count": counts_by_day.get(
+                (window_start + timedelta(days=i)).isoformat(), 0
+            ),
+        }
+        for i in range(30)
+    ]
+
     return {
         "total_packages": total_packages,
         "processing": processing,
@@ -829,6 +933,7 @@ def compute_dashboard_summary(session: Session) -> dict:
         "processing_errors": processing_errors,
         "straight_through_rate": straight_through_rate,
         "top_validation_failures": top_validation_failures,
+        "packages_by_day": packages_by_day,
     }
 
 
@@ -910,13 +1015,13 @@ def list_policy_evidence_for_package(
     return list(session.query(PolicyEvidence).filter_by(package_id=package_id).all())
 
 
-def latest_decision_for_package(session: Session, package_id: str) -> Decision | None:
-    return (
-        session.query(Decision)
-        .filter_by(package_id=package_id)
-        .order_by(Decision.created_at.desc())
-        .first()
-    )
+def latest_decision_for_package(
+    session: Session, package_id: str, *, source: str | None = None
+) -> Decision | None:
+    query = session.query(Decision).filter_by(package_id=package_id)
+    if source is not None:
+        query = query.filter_by(source=source)
+    return query.order_by(Decision.created_at.desc()).first()
 
 
 def list_decisions_for_package(session: Session, package_id: str) -> list[Decision]:

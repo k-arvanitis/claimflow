@@ -150,6 +150,8 @@ def _validate(data: dict) -> list[ValidationFailure]:
                     ),
                     severity="warning",
                     policy_required=True,
+                    machine_value=f"${computed:.2f}",
+                    expected_value=f"${subtotal:.2f}",
                 )
             )
         additions = sum(
@@ -158,7 +160,17 @@ def _validate(data: dict) -> list[ValidationFailure]:
             if data.get(field) is not None
         )
         rcv = Decimal(str(data.get("total_replacement_cost", "0")))
-        if rcv > 0 and abs((subtotal + additions) - rcv) > Decimal("1.00"):
+        # Nothing extracted to reconcile against (no line items, no printed subtotal, no
+        # overhead/profit/tax) — treating that as "$0" would flag every RCV as a false
+        # arithmetic mismatch instead of recognizing there's no basis for the check.
+        has_reconciliation_basis = (
+            bool(lines) or printed_line_total is not None or additions > 0
+        )
+        if (
+            has_reconciliation_basis
+            and rcv > 0
+            and abs((subtotal + additions) - rcv) > Decimal("1.00")
+        ):
             failures.append(
                 ValidationFailure(
                     field="total_replacement_cost",
@@ -169,6 +181,8 @@ def _validate(data: dict) -> list[ValidationFailure]:
                     ),
                     severity="warning",
                     policy_required=True,
+                    machine_value=f"${subtotal + additions:.2f}",
+                    expected_value=f"${rcv:.2f}",
                 )
             )
     except InvalidOperation:
@@ -195,6 +209,8 @@ def _validate(data: dict) -> list[ValidationFailure]:
                     reason=f"ACV ${acv:.2f} does not equal RCV ${rcv:.2f} minus depreciation ${dep:.2f}",
                     severity="warning",
                     policy_required=True,
+                    machine_value=f"${acv:.2f}",
+                    expected_value=f"${(rcv - dep):.2f}",
                 )
             )
     except InvalidOperation:
@@ -289,6 +305,7 @@ PROPERTY = Domain(
         "acv_check": "What is the policy when actual cash value does not equal RCV minus depreciation? {reason}",
         "negative_amount": "What is the policy when a claim amount is negative? {reason}",
     },
+    client_name_field="insured_name",
 )
 
 register(PROPERTY)
@@ -418,6 +435,8 @@ def _validate_declarations(data: dict) -> list[ValidationFailure]:
                 reason=f"Claim property address '{property_address}' does not fuzzy-match insured address '{insured_address}'",
                 severity="warning",
                 policy_required=False,
+                machine_value=str(insured_address),
+                expected_value=str(property_address),
             )
         )
 
@@ -455,5 +474,6 @@ DECLARATIONS_PAGE = Domain(
     validate=_validate_declarations,
     display_name="Insurance Declarations Page",
     policy_collection="property",
+    client_name_field="insured_name",
 )
 register(DECLARATIONS_PAGE)

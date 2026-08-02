@@ -1,0 +1,22 @@
+{
+  "cms_medicare_claims_processing_manual_ch26.pdf": {
+    "domain": "health",
+    "authority": "official_cms"
+  },
+  "cms_npi_fact_sheet.pdf": {
+    "domain": "health",
+    "authority": "official_cms"
+  },
+  "health_policy.pdf": {
+    "domain": "health",
+    "authority": "synthetic"
+  },
+  "loan_policy.pdf": {
+    "domain": "loan",
+    "authority": "synthetic"
+  },
+  "property_policy.pdf": {
+    "domain": "property",
+    "authority": "synthetic"
+  }
+}

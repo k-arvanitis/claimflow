@@ -25,10 +25,17 @@ def test_recover_stale_processing_packages_marks_them_processing_error(session):
 
     assert recovered == ["pkg-stuck"]
     assert session.get(db.Package, "pkg-stuck").status == "processing_error"
-    assert session.get(db.Package, "pkg-stuck").error == "process interrupted by application restart"
+    assert (
+        session.get(db.Package, "pkg-stuck").error
+        == "process interrupted by application restart"
+    )
     assert session.get(db.Package, "pkg-fine").status == "completed"
 
-    entries = session.query(db.AuditLogEntry).filter_by(package_id="pkg-stuck", action="status_transition").all()
+    entries = (
+        session.query(db.AuditLogEntry)
+        .filter_by(package_id="pkg-stuck", action="status_transition")
+        .all()
+    )
     assert len(entries) == 1
 
 
@@ -36,13 +43,20 @@ def test_transition_package_status_logs_audit_entry(session):
     session.add(db.Package(id="pkg1", status="queued"))
     session.commit()
 
-    db.transition_package_status(session, "pkg1", "processing", reason="process started")
+    db.transition_package_status(
+        session, "pkg1", "processing", reason="process started"
+    )
 
     pkg = session.get(db.Package, "pkg1")
     assert pkg.status == "processing"
-    entries = session.query(db.AuditLogEntry).filter_by(package_id="pkg1", action="status_transition").all()
+    entries = (
+        session.query(db.AuditLogEntry)
+        .filter_by(package_id="pkg1", action="status_transition")
+        .all()
+    )
     assert len(entries) == 1
     import json
+
     detail = json.loads(entries[0].detail_json)
     assert detail == {"from": "queued", "to": "processing", "reason": "process started"}
 
@@ -59,17 +73,37 @@ def test_try_start_processing_rejects_concurrent_call(session):
 
 
 def test_try_start_processing_allows_retry_from_failure_states(session):
-    for failure_status in ("processing_error", "validation_error", "retrieval_error", "review_ready", "completed"):
+    for failure_status in (
+        "processing_error",
+        "validation_error",
+        "retrieval_error",
+        "review_ready",
+        "completed",
+    ):
         session.add(db.Package(id=f"pkg-{failure_status}", status=failure_status))
     session.commit()
 
-    for failure_status in ("processing_error", "validation_error", "retrieval_error", "review_ready", "completed"):
+    for failure_status in (
+        "processing_error",
+        "validation_error",
+        "retrieval_error",
+        "review_ready",
+        "completed",
+    ):
         assert db.try_start_processing(session, f"pkg-{failure_status}") is True
 
 
 def test_extraction_run_attempt_increments_on_reprocess(session):
     session.add(db.Package(id="pkg1", status="queued"))
-    session.add(db.Document(id="doc1", package_id="pkg1", path="a.pdf", doc_type="cms1500", has_text_layer=True))
+    session.add(
+        db.Document(
+            id="doc1",
+            package_id="pkg1",
+            path="a.pdf",
+            doc_type="cms1500",
+            has_text_layer=True,
+        )
+    )
     session.commit()
 
     run1 = db.create_extraction_run(session, "doc1", "cms1500", "pass", 0.9)
@@ -81,11 +115,15 @@ def test_extraction_run_attempt_increments_on_reprocess(session):
 
 def test_process_rejects_concurrent_call(monkeypatch):
     with TestClient(app) as client:
-        create = client.post("/packages", files={"files": ("a.pdf", b"%PDF-1.4", "application/pdf")})
+        create = client.post(
+            "/packages", files={"files": ("a.pdf", b"%PDF-1.4", "application/pdf")}
+        )
         package_id = create.json()["package_id"]
 
         session = db.SessionLocal()
-        db.transition_package_status(session, package_id, "processing", reason="test setup")
+        db.transition_package_status(
+            session, package_id, "processing", reason="test setup"
+        )
         session.close()
 
         resp = client.post(f"/packages/{package_id}/process")
@@ -96,11 +134,15 @@ def test_process_rejects_concurrent_call(monkeypatch):
 
 def test_process_allows_retry_after_processing_error(monkeypatch):
     with TestClient(app) as client:
-        create = client.post("/packages", files={"files": ("a.pdf", b"%PDF-1.4", "application/pdf")})
+        create = client.post(
+            "/packages", files={"files": ("a.pdf", b"%PDF-1.4", "application/pdf")}
+        )
         package_id = create.json()["package_id"]
 
         session = db.SessionLocal()
-        db.transition_package_status(session, package_id, "processing_error", reason="test setup")
+        db.transition_package_status(
+            session, package_id, "processing_error", reason="test setup"
+        )
         session.close()
 
         resp = client.post(f"/packages/{package_id}/process")
@@ -111,9 +153,15 @@ def test_process_allows_retry_after_processing_error(monkeypatch):
 def test_run_claim_classifies_structured_error_as_processing_error(tmp_path):
     graph = MagicMock()
     graph.invoke.return_value = {
-        "decision": None, "extraction_data": None, "domain": None, "documents": [],
-        "extraction_fields": [], "validation_failures": [], "policy_answers": [],
-        "review_reasons": [], "error": "No supported domain detected in package",
+        "decision": None,
+        "extraction_data": None,
+        "domain": None,
+        "documents": [],
+        "extraction_fields": [],
+        "validation_failures": [],
+        "policy_answers": [],
+        "review_reasons": [],
+        "error": "No supported domain detected in package",
     }
     graph.get_state.return_value = MagicMock(values={})
 
@@ -131,9 +179,15 @@ def test_run_claim_classifies_structured_error_as_processing_error(tmp_path):
 def test_run_claim_classifies_approved_decision_as_completed(tmp_path):
     graph = MagicMock()
     graph.invoke.return_value = {
-        "decision": "ready_for_processing", "extraction_data": {}, "domain": "cms1500", "documents": [],
-        "extraction_fields": [], "validation_failures": [], "policy_answers": [],
-        "review_reasons": [], "error": None,
+        "decision": "ready_for_processing",
+        "extraction_data": {},
+        "domain": "cms1500",
+        "documents": [],
+        "extraction_fields": [],
+        "validation_failures": [],
+        "policy_answers": [],
+        "review_reasons": [],
+        "error": None,
     }
 
     session = db.SessionLocal()
@@ -150,9 +204,15 @@ def test_run_claim_classifies_approved_decision_as_completed(tmp_path):
 def test_run_claim_classifies_flagged_decision_as_review_ready(tmp_path):
     graph = MagicMock()
     graph.invoke.return_value = {
-        "decision": "needs_review", "extraction_data": {}, "domain": "cms1500", "documents": [],
-        "extraction_fields": [], "validation_failures": [], "policy_answers": [],
-        "review_reasons": ["low confidence"], "error": None,
+        "decision": "needs_review",
+        "extraction_data": {},
+        "domain": "cms1500",
+        "documents": [],
+        "extraction_fields": [],
+        "validation_failures": [],
+        "policy_answers": [],
+        "review_reasons": ["low confidence"],
+        "error": None,
     }
 
     session = db.SessionLocal()
@@ -169,7 +229,10 @@ def test_run_claim_classifies_flagged_decision_as_review_ready(tmp_path):
 def test_classify_exception_retrieval_error_when_retrieve_should_have_run():
     graph = MagicMock()
     graph.get_state.return_value = MagicMock(
-        values={"validation_failures": [{"field": "f", "rule": "r", "reason": "x"}], "extraction_data": {"a": 1}}
+        values={
+            "validation_failures": [{"field": "f", "rule": "r", "reason": "x"}],
+            "extraction_data": {"a": 1},
+        }
     )
     assert _classify_exception(graph, {}) == "retrieval_error"
 
@@ -187,7 +250,11 @@ def test_classify_exception_processing_error_when_validation_passed_and_review_c
 def test_classify_exception_validation_error_when_extraction_done_but_no_validation():
     graph = MagicMock()
     graph.get_state.return_value = MagicMock(
-        values={"extraction_data": {"a": 1}, "validation_failures": None, "policy_answers": []}
+        values={
+            "extraction_data": {"a": 1},
+            "validation_failures": None,
+            "policy_answers": [],
+        }
     )
     assert _classify_exception(graph, {}) == "validation_error"
 
@@ -212,21 +279,33 @@ def test_classify_exception_against_real_graph_state(monkeypatch):
 
     def fake_ingest(state):
         return {
-            "documents": [{
-                "path": "x.pdf", "doc_type": "cms1500", "has_text_layer": True,
-                "scan_quality": None, "classification_reason": "test",
-            }],
-            "domain": "cms1500", "ocr_log": [],
+            "documents": [
+                {
+                    "path": "x.pdf",
+                    "doc_type": "cms1500",
+                    "has_text_layer": True,
+                    "scan_quality": None,
+                    "classification_reason": "test",
+                }
+            ],
+            "domain": "cms1500",
+            "ocr_log": [],
         }
 
     def fake_extract(state):
         return {
-            "extraction_data": {"field": "value"}, "extraction_fields": [],
-            "extraction_status": "pass", "extraction_overall_confidence": 0.9,
+            "extraction_data": {"field": "value"},
+            "extraction_fields": [],
+            "extraction_status": "pass",
+            "extraction_overall_confidence": 0.9,
         }
 
     def fake_validate(state):
-        return {"validation_failures": [{"field": "f", "rule": "r", "reason": "simulated failure"}]}
+        return {
+            "validation_failures": [
+                {"field": "f", "rule": "r", "reason": "simulated failure"}
+            ]
+        }
 
     def crashing_retrieve(state):
         raise RuntimeError("simulated retrieval crash")
@@ -240,12 +319,17 @@ def test_classify_exception_against_real_graph_state(monkeypatch):
     config = {"configurable": {"thread_id": "test-real-graph-thread"}}
 
     with pytest.raises(RuntimeError, match="simulated retrieval crash"):
-        graph.invoke({"package_dir": "unused", "domain": None, "doc_type_overrides": {}}, config=config)
+        graph.invoke(
+            {"package_dir": "unused", "domain": None, "doc_type_overrides": {}},
+            config=config,
+        )
 
     values = graph.get_state(config).values
 
     # Empirical confirmation: retrieve's output channel is absent, not None.
     assert "policy_answers" not in values
-    assert values["validation_failures"] == [{"field": "f", "rule": "r", "reason": "simulated failure"}]
+    assert values["validation_failures"] == [
+        {"field": "f", "rule": "r", "reason": "simulated failure"}
+    ]
 
     assert _classify_exception(graph, config) == "retrieval_error"

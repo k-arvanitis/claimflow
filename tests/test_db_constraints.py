@@ -16,7 +16,15 @@ def engine(tmp_path):
 def test_foreign_keys_are_enforced(engine):
     Session = sessionmaker(bind=engine)
     session = Session()
-    session.add(db.Document(id="doc1", package_id="does-not-exist", path="a.pdf", doc_type="cms1500", has_text_layer=True))
+    session.add(
+        db.Document(
+            id="doc1",
+            package_id="does-not-exist",
+            path="a.pdf",
+            doc_type="cms1500",
+            has_text_layer=True,
+        )
+    )
     with pytest.raises(IntegrityError):
         session.commit()
 
@@ -25,9 +33,34 @@ def test_deleting_package_cascades_to_children_but_not_audit(engine):
     Session = sessionmaker(bind=engine)
     session = Session()
     session.add(db.Package(id="pkg1", status="completed"))
-    session.add(db.Document(id="doc1", package_id="pkg1", path="a.pdf", doc_type="cms1500", has_text_layer=True))
-    session.add(db.ExtractionRun(id="run1", document_id="doc1", schema_name="cms1500", status="pass", overall_confidence=0.9))
-    session.add(db.ExtractedField(extraction_run_id="run1", name="f", confidence=0.9, grounded=True, valid=True, field_status="found"))
+    session.add(
+        db.Document(
+            id="doc1",
+            package_id="pkg1",
+            path="a.pdf",
+            doc_type="cms1500",
+            has_text_layer=True,
+        )
+    )
+    session.add(
+        db.ExtractionRun(
+            id="run1",
+            document_id="doc1",
+            schema_name="cms1500",
+            status="pass",
+            overall_confidence=0.9,
+        )
+    )
+    session.add(
+        db.ExtractedField(
+            extraction_run_id="run1",
+            name="f",
+            confidence=0.9,
+            grounded=True,
+            valid=True,
+            field_status="found",
+        )
+    )
     session.add(db.AuditLogEntry(package_id="pkg1", actor="api", action="upload"))
     session.commit()
 
@@ -46,8 +79,24 @@ def test_duplicate_document_path_in_same_package_rejected(engine):
     session = Session()
     session.add(db.Package(id="pkg1", status="completed"))
     session.commit()
-    session.add(db.Document(id="doc1", package_id="pkg1", path="a.pdf", doc_type="cms1500", has_text_layer=True))
+    session.add(
+        db.Document(
+            id="doc1",
+            package_id="pkg1",
+            path="a.pdf",
+            doc_type="cms1500",
+            has_text_layer=True,
+        )
+    )
     session.commit()
-    session.add(db.Document(id="doc2", package_id="pkg1", path="a.pdf", doc_type="cms1500", has_text_layer=True))
+    session.add(
+        db.Document(
+            id="doc2",
+            package_id="pkg1",
+            path="a.pdf",
+            doc_type="cms1500",
+            has_text_layer=True,
+        )
+    )
     with pytest.raises(IntegrityError):
         session.commit()

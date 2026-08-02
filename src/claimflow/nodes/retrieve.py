@@ -39,10 +39,24 @@ def _get_reranker():
     return _reranker
 
 
+def reset_llm_client() -> None:
+    """Drop the cached client so the next call picks up a changed BYOK override."""
+    global _llm_client
+    _llm_client = None
+
+
 def _get_llm_client():
     global _llm_client
     if _llm_client is None:
-        if settings.doc_intel_provider == "anthropic":
+        from claimflow.llm_credentials import resolve_override
+
+        override = resolve_override()
+        if override is not None:
+            from openai import OpenAI
+
+            base_url, api_key, model = override
+            _llm_client = ("openai", OpenAI(api_key=api_key, base_url=base_url), model)
+        elif settings.doc_intel_provider == "anthropic":
             import anthropic
 
             _llm_client = (
@@ -50,6 +64,7 @@ def _get_llm_client():
                 anthropic.Anthropic(
                     api_key=settings.anthropic_api_key.get_secret_value()
                 ),
+                settings.llm_model,
             )
         else:
             from openai import OpenAI
@@ -61,6 +76,7 @@ def _get_llm_client():
                     base_url=settings.doc_intel_llm_base_url
                     or "https://api.openai.com/v1",
                 ),
+                settings.doc_intel_model,
             )
     return _llm_client
 
@@ -133,17 +149,17 @@ def _search(question: str, domain_key: str | None) -> list[dict]:
     ),
 )
 def _call_llm(prompt: str) -> str:
-    provider, client = _get_llm_client()
+    provider, client, model = _get_llm_client()
     if provider == "anthropic":
         response = client.messages.create(
-            model=settings.llm_model,
+            model=model,
             max_tokens=512,
             messages=[{"role": "user", "content": prompt}],
         )
         return response.content[0].text
     else:
         response = client.chat.completions.create(
-            model=settings.doc_intel_model,
+            model=model,
             max_tokens=512,
             messages=[{"role": "user", "content": prompt}],
         )
@@ -196,7 +212,12 @@ def _synthesize(
 
     if not chunks:
         return PolicyAnswer(
-            question=question, answer="No relevant policy document found.", citations=[]
+            question=question,
+            answer="No relevant policy document found.",
+            citations=[],
+            field=failure.get("field") if failure else None,
+            rule=failure.get("rule") if failure else None,
+            status="not_found",
         )
 
     pack = get_domain(domain_key) if domain_key else None
@@ -238,7 +259,14 @@ def _synthesize(
             logger.error("LLM synthesis failed after retries: %s", e)
             answer = "Policy lookup failed — manual review required."
 
-    return PolicyAnswer(question=question, answer=answer, citations=citations)
+    return PolicyAnswer(
+        question=question,
+        answer=answer,
+        citations=citations,
+        field=failure.get("field") if failure else None,
+        rule=failure.get("rule") if failure else None,
+        status="found",
+    )
 
 
 def retrieve_node(state: ClaimState) -> dict:

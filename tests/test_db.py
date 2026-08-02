@@ -234,6 +234,77 @@ def test_persist_extraction_result_writes_all_rows():
     session.close()
 
 
+def test_persist_extraction_result_sets_client_name_from_domain_field():
+    session = _make_session()
+    pkg = db.create_package(session, str(uuid.uuid4()))
+
+    result = {
+        "domain": "cms1500",
+        "documents": [
+            {
+                "path": "/tmp/claim.pdf",
+                "doc_type": "cms1500",
+                "has_text_layer": True,
+                "scan_quality": None,
+            }
+        ],
+        "extraction_status": "pass",
+        "extraction_overall_confidence": 0.9,
+        "extraction_fields": [
+            {
+                "name": "patient_name",
+                "value": "SARAH SMITH",
+                "confidence": 1.0,
+                "grounded": True,
+                "valid": True,
+                "field_status": "found",
+                "evidence": None,
+            },
+        ],
+    }
+
+    db.persist_extraction_result(session, pkg.id, result)
+
+    refreshed = db.get_package(session, pkg.id)
+    assert refreshed.client_name == "SARAH SMITH"
+    assert refreshed.client_key == "sarah smith"
+    session.close()
+
+
+def test_set_package_client_name_normalizes_key():
+    session = _make_session()
+    pkg = db.create_package(session, str(uuid.uuid4()))
+
+    db.set_package_client_name(session, pkg.id, "Smith, Sarah!")
+
+    refreshed = db.get_package(session, pkg.id)
+    assert refreshed.client_name == "Smith, Sarah!"
+    assert refreshed.client_key == "smith sarah"
+
+    db.set_package_client_name(session, pkg.id, None)
+    refreshed = db.get_package(session, pkg.id)
+    assert refreshed.client_name is None
+    assert refreshed.client_key is None
+    session.close()
+
+
+def test_list_packages_filtered_by_client_key_and_search():
+    session = _make_session()
+    pkg1 = db.create_package(session, str(uuid.uuid4()))
+    pkg2 = db.create_package(session, str(uuid.uuid4()))
+    db.set_package_client_name(session, pkg1.id, "Sarah Smith")
+    db.set_package_client_name(session, pkg2.id, "John Doe")
+
+    by_key, total_key = db.list_packages_filtered(session, client_key="sarah smith")
+    assert total_key == 1
+    assert by_key[0].id == pkg1.id
+
+    by_search, total_search = db.list_packages_filtered(session, search="smith")
+    assert total_search == 1
+    assert by_search[0].id == pkg1.id
+    session.close()
+
+
 def test_list_and_get_package():
     session = _make_session()
     pkg1 = db.create_package(session, str(uuid.uuid4()))
@@ -387,6 +458,35 @@ def test_decision_and_audit_lookups():
 
     flagged = db.list_flagged_packages(session)
     assert pkg.id in {p.id for p in flagged}
+    session.close()
+
+
+def test_decision_source_and_override_tracked_separately():
+    """System recommendations and reviewer outcomes must be distinguishable, and an
+    override must be flagged — not silently overwrite the system's recommendation."""
+    session = _make_session()
+    pkg = db.create_package(session, str(uuid.uuid4()))
+    db.create_decision(session, pkg.id, "needs_review", [], source="system")
+    reviewer = db.create_decision(
+        session,
+        pkg.id,
+        "ready_for_processing",
+        ["reviewer judgment"],
+        source="reviewer",
+        is_override=True,
+    )
+
+    system_latest = db.latest_decision_for_package(session, pkg.id, source="system")
+    reviewer_latest = db.latest_decision_for_package(session, pkg.id, source="reviewer")
+
+    assert system_latest.decision == "needs_review"
+    assert reviewer_latest.id == reviewer.id
+    assert reviewer_latest.is_override is True
+
+    model = db.package_read_model(session, pkg)
+    assert model["system_recommendation"] == "needs_review"
+    assert model["reviewer_outcome"] == "ready_for_processing"
+    assert model["reviewer_override"] is True
     session.close()
 
 

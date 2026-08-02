@@ -13,3 +13,24 @@ class SettingsResponse(BaseModel):
     qdrant_collection: str
     langfuse_enabled: bool
     anthropic_api_key_configured: bool
+
+
+class LLMCredentialsRequest(BaseModel):
+    provider: str
+    api_key: str | None = None
+    model: str | None = None
+
+
+class LLMCredentialsResponse(BaseModel):
+    provider: str | None
+    model: str | None
+    key_set: bool
+    key_last4: str | None
+    providers: list[str]
+    active_service: str
+    active_model: str
+    using_override: bool
+
+
+class StatusResponse(BaseModel):
+    status: str

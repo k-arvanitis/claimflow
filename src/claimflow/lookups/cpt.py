@@ -14,7 +14,9 @@ def _load() -> set[str]:
     if _codes is not None:
         return _codes
     if not _CSV_PATH.exists():
-        raise FileNotFoundError(f"CPT lookup not found at {_CSV_PATH}. Run scripts/download_lookups.py")
+        raise FileNotFoundError(
+            f"CPT lookup not found at {_CSV_PATH}. Run scripts/download_lookups.py"
+        )
     _codes = set()
     with open(_CSV_PATH) as f:
         next(f)  # skip header

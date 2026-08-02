@@ -6,15 +6,16 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, UploadFile
+from fastapi import BackgroundTasks, FastAPI, Form, HTTPException, Query, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 
 from claimflow import db, review
 from claimflow.config import settings
 from claimflow.domains.base import all_domains
 from claimflow.domains.base import get as get_domain
+from claimflow.excel_export import build_batch_workbook, build_case_workbook
 from claimflow.graph import build_graph
 from claimflow.nodes.ingest import INGESTIBLE_SUFFIXES
 from claimflow.nodes.review import review_node
@@ -36,6 +37,7 @@ from claimflow.schemas.packages import (
     PackageSummary,
 )
 from claimflow.schemas.pagination import PaginatedPackagesResponse
+from claimflow.schemas.policies import PolicyFile, PolicyIndexStatus
 from claimflow.schemas.reporting import (
     AuditEventItem,
     ExportResponse,
@@ -58,7 +60,12 @@ from claimflow.schemas.review_write import (
     ValidationRerunRequest,
     ValidationRerunResponse,
 )
-from claimflow.schemas.settings import SettingsResponse
+from claimflow.schemas.settings import (
+    LLMCredentialsRequest,
+    LLMCredentialsResponse,
+    SettingsResponse,
+    StatusResponse,
+)
 from claimflow.tracing import get_callback
 
 logger = logging.getLogger(__name__)
@@ -194,6 +201,56 @@ async def get_settings():
     )
 
 
+@app.get("/llm-credentials", response_model=LLMCredentialsResponse, tags=["settings"])
+async def get_llm_credentials():
+    """The stored BYOK provider/model and whether a key is set, masked to its last
+    4 characters, plus the effective service/model. Never returns the full key."""
+    from claimflow.llm_credentials import PROVIDERS, get_active, get_masked
+
+    active = get_active(
+        settings.doc_intel_provider,
+        settings.doc_intel_model,
+        settings.doc_intel_llm_base_url,
+    )
+    return LLMCredentialsResponse(
+        **get_masked(),
+        **active,
+        providers=list(PROVIDERS.keys()),
+    )
+
+
+@app.post(
+    "/llm-credentials",
+    response_model=StatusResponse,
+    tags=["settings"],
+    responses=ERROR_RESPONSES,
+)
+async def set_llm_credentials(body: LLMCredentialsRequest):
+    """Save the chosen provider/key/model. A blank api_key keeps the existing
+    stored key (see set_credentials's docstring). Takes effect immediately."""
+    from claimflow.llm_credentials import set_credentials
+
+    try:
+        set_credentials(body.provider, body.api_key, body.model)
+    except ValueError as e:
+        raise AppError(400, "UNKNOWN_PROVIDER", str(e)) from e
+    return StatusResponse(status="ok")
+
+
+@app.delete(
+    "/llm-credentials",
+    response_model=StatusResponse,
+    tags=["settings"],
+    responses=ERROR_RESPONSES,
+)
+async def delete_llm_credentials():
+    """Clear the stored override, reverting to the env-configured LLM."""
+    from claimflow.llm_credentials import clear_credentials
+
+    clear_credentials()
+    return StatusResponse(status="ok")
+
+
 @app.get(
     "/domain-packs",
     response_model=list[DomainPackSummary],
@@ -221,7 +278,9 @@ def list_domain_packs():
 def get_domain_pack(key: str):
     domain = get_domain(key)
     if domain is None:
-        raise AppError(404, "DOMAIN_PACK_NOT_FOUND", f"No domain pack registered for {key!r}")
+        raise AppError(
+            404, "DOMAIN_PACK_NOT_FOUND", f"No domain pack registered for {key!r}"
+        )
     model_fields = domain.spec.model.model_fields
     required = [name for name, f in model_fields.items() if f.is_required()]
     optional = [name for name, f in model_fields.items() if not f.is_required()]
@@ -231,12 +290,81 @@ def get_domain_pack(key: str):
         document_types=[domain.doc_type, *sorted(domain.supporting_types.keys())],
         required_fields=required,
         optional_fields=optional,
-        confidence_threshold=domain.confidence_threshold or settings.confidence_threshold,
-        escalation_threshold=domain.escalation_threshold or settings.escalation_threshold,
+        confidence_threshold=domain.confidence_threshold
+        or settings.confidence_threshold,
+        escalation_threshold=domain.escalation_threshold
+        or settings.escalation_threshold,
         policy_collection=domain.policy_collection,
         retrieval_mode=domain.retrieval_mode,
         reviewer_guidance=domain.reviewer_guidance,
     )
+
+
+@app.get("/policies", response_model=list[PolicyFile], tags=["policies"])
+def list_policies():
+    from claimflow.policy_index import list_policy_files
+
+    return list_policy_files()
+
+
+@app.get(
+    "/policies/{filename}/file",
+    tags=["policies"],
+    summary="Download/view a policy document's original PDF",
+    responses=ERROR_RESPONSES,
+)
+def get_policy_file(filename: str):
+    from claimflow.policy_index import policy_file_path
+
+    path = policy_file_path(filename)
+    if path is None:
+        raise AppError(404, "POLICY_NOT_FOUND", "Policy file does not exist")
+    return FileResponse(
+        path,
+        media_type="application/pdf",
+        filename=path.name,
+        content_disposition_type="inline",
+    )
+
+
+@app.post(
+    "/policies",
+    response_model=PolicyIndexStatus,
+    tags=["policies"],
+    summary="Add or replace a policy document and rebuild the retrieval index",
+    responses=ERROR_RESPONSES,
+)
+async def upload_policy(
+    file: UploadFile, domain: str = Form(...), authority: str = Form("synthetic")
+):
+    from claimflow.policy_index import AUTHORITIES, DOMAINS, reindex, save_policy_file
+
+    if domain not in DOMAINS:
+        raise AppError(400, "UNKNOWN_DOMAIN", f"Unknown policy domain: {domain!r}")
+    if authority not in AUTHORITIES:
+        raise AppError(400, "UNKNOWN_AUTHORITY", f"Unknown authority: {authority!r}")
+    name = Path(file.filename or "").name
+    if not name or Path(name).suffix.lower() != ".pdf":
+        raise AppError(400, "UNSUPPORTED_FILE_TYPE", "Policy documents must be a PDF")
+    contents = await file.read()
+    save_policy_file(name, contents, domain, authority)
+    count = reindex()
+    return PolicyIndexStatus(status="ok", chunk_count=count)
+
+
+@app.delete(
+    "/policies/{filename}",
+    response_model=PolicyIndexStatus,
+    tags=["policies"],
+    responses=ERROR_RESPONSES,
+)
+async def delete_policy(filename: str):
+    from claimflow.policy_index import delete_policy_file, reindex
+
+    if not delete_policy_file(filename):
+        raise AppError(404, "POLICY_NOT_FOUND", "Policy file does not exist")
+    count = reindex()
+    return PolicyIndexStatus(status="ok", chunk_count=count)
 
 
 def _classify_exception(graph, config) -> str:
@@ -297,6 +425,7 @@ def _run_claim(
     package_id: str,
     pkg_dir: Path,
     doc_type_overrides: dict[str, str] | None = None,
+    requested_domain: str | None = None,
 ) -> None:
     session = db.SessionLocal()
     thread_id = str(uuid.uuid4())
@@ -304,7 +433,7 @@ def _run_claim(
     try:
         state = {
             "package_dir": str(pkg_dir),
-            "domain": None,
+            "domain": requested_domain,
             "doc_type_overrides": doc_type_overrides or {},
         }
         result = graph.invoke(state, config=config)
@@ -314,6 +443,8 @@ def _run_claim(
                 "decision": result.get("decision"),
                 "extraction_data": result.get("extraction_data"),
                 "domain": result.get("domain"),
+                "detected_domain": result.get("detected_domain"),
+                "domain_mismatch": result.get("domain_mismatch", False),
                 "documents": result.get("documents", []),
                 "ocr_log": result.get("ocr_log", []),
                 "extraction_overall_confidence": result.get(
@@ -366,13 +497,20 @@ def _run_claim(
     summary="Upload documents and create a new claim package",
     responses=ERROR_RESPONSES,
 )
-async def create_package(files: list[UploadFile], background_tasks: BackgroundTasks):
+async def create_package(
+    files: list[UploadFile],
+    background_tasks: BackgroundTasks,
+    domain: str | None = Form(None),
+):
     if len(files) > settings.max_files_per_package:
         raise AppError(
             400,
             "TOO_MANY_FILES",
             f"A package may contain at most {settings.max_files_per_package} files",
         )
+
+    if domain is not None and domain not in {d.doc_type for d in all_domains()}:
+        raise AppError(400, "UNKNOWN_DOMAIN", f"Unknown workflow: {domain!r}")
 
     for f in files:
         name = Path(f.filename or "").name
@@ -427,7 +565,9 @@ async def create_package(files: list[UploadFile], background_tasks: BackgroundTa
     finally:
         session.close()
 
-    background_tasks.add_task(_run_claim, app.state.graph, package_id, pkg_dir)
+    background_tasks.add_task(
+        _run_claim, app.state.graph, package_id, pkg_dir, None, domain
+    )
     return PackageCreateResponse(package_id=package_id, status=PackageStatus.PROCESSING)
 
 
@@ -449,6 +589,7 @@ async def list_packages(
     date_from: datetime | None = None,
     date_to: datetime | None = None,
     search: str | None = None,
+    client_key: str | None = None,
     sort: str = "-created_at",
 ):
     session = db.SessionLocal()
@@ -464,6 +605,7 @@ async def list_packages(
             date_from=date_from,
             date_to=date_to,
             search=search,
+            client_key=client_key,
             sort=sort,
             page=page,
             page_size=page_size,
@@ -475,6 +617,66 @@ async def list_packages(
             page=page,
             page_size=min(page_size, db.MAX_PAGE_SIZE),
             total=total,
+        )
+    finally:
+        session.close()
+
+
+@app.get(
+    "/packages/export.xlsx",
+    tags=["reporting"],
+    summary="Export multiple packages (matching the same filters as GET /packages) as one workbook",
+    responses=ERROR_RESPONSES,
+)
+async def export_packages_batch_excel(
+    status: str | None = None,
+    domain: str | None = None,
+    decision: str | None = None,
+    client_key: str | None = None,
+    search: str | None = None,
+):
+    session = db.SessionLocal()
+    try:
+        rows, _total = db.list_packages_filtered(
+            session,
+            status=status,
+            domain=domain,
+            decision=decision,
+            search=search,
+            client_key=client_key,
+            page=1,
+            page_size=db.MAX_PAGE_SIZE,
+        )
+        packages = []
+        for pkg in rows:
+            result = json.loads(pkg.result_json) if pkg.result_json else {}
+            run = db.latest_extraction_run_for_package(session, pkg.id)
+            fields = db.list_extracted_fields_for_run(session, run.id) if run else []
+            actions = db.latest_review_actions_for_run(session, run.id) if run else {}
+            reviewed_data = review.merge_reviewed_values(
+                result.get("extraction_data") or {}, actions
+            )
+            failures = (
+                db.list_validation_failures_for_run(session, run.id, current_only=True)
+                if run
+                else []
+            )
+            packages.append(
+                {
+                    "package_id": pkg.id,
+                    "fields": fields,
+                    "reviewed_data": reviewed_data,
+                    "failures": failures,
+                    "audit_events": db.list_audit_events_for_package(session, pkg.id),
+                }
+            )
+        xlsx_bytes = build_batch_workbook(packages)
+        return Response(
+            content=xlsx_bytes,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": 'attachment; filename="packages_export.xlsx"'
+            },
         )
     finally:
         session.close()
@@ -546,6 +748,10 @@ async def process_package(package_id: str, background_tasks: BackgroundTasks):
             for doc in db.list_documents(session, package_id)
             if doc.manually_overridden
         }
+        # A previously-resolved domain (user-selected or detected) carries forward so
+        # reprocessing doesn't silently drop the workflow the package was running under.
+        prior_result = json.loads(pkg.result_json) if pkg.result_json else {}
+        requested_domain = prior_result.get("domain")
         started = db.try_start_processing(session, package_id)
         if not started:
             raise AppError(
@@ -556,7 +762,7 @@ async def process_package(package_id: str, background_tasks: BackgroundTasks):
 
     pkg_dir = Path(settings.storage_dir) / package_id
     background_tasks.add_task(
-        _run_claim, app.state.graph, package_id, pkg_dir, overrides
+        _run_claim, app.state.graph, package_id, pkg_dir, overrides, requested_domain
     )
     return PackageCreateResponse(package_id=package_id, status=PackageStatus.PROCESSING)
 
@@ -858,6 +1064,8 @@ async def get_package_review(package_id: str):
                     reason=vf.reason,
                     severity=vf.severity,
                     policy_required=vf.policy_required,
+                    machine_value=vf.machine_value,
+                    expected_value=vf.expected_value,
                 )
                 for vf in failures
             ],
@@ -901,6 +1109,13 @@ async def submit_field_review(package_id: str, field_id: int, body: FieldReviewR
             reviewer=body.reviewer,
             note=body.note,
         )
+        domain_pack = get_domain(run.schema_name) if run else None
+        if (
+            domain_pack
+            and domain_pack.client_name_field == field.name
+            and body.corrected_value is not None
+        ):
+            db.set_package_client_name(session, package_id, body.corrected_value)
         db.log_audit(
             session,
             package_id,
@@ -972,7 +1187,13 @@ async def rerun_package_validation(package_id: str, body: ValidationRerunRequest
         }
         outcome = review_node(review_state)
         new_decision = outcome["decision"]
-        db.create_decision(session, package_id, new_decision, outcome["review_reasons"])
+        db.create_decision(
+            session,
+            package_id,
+            new_decision,
+            outcome["review_reasons"],
+            source="system",
+        )
 
         result.update(
             {
@@ -1028,16 +1249,31 @@ async def submit_package_decision(package_id: str, body: DecisionRequest):
         pkg = db.get_package(session, package_id)
         if pkg is None:
             raise AppError(404, "PACKAGE_NOT_FOUND", "Package does not exist")
+        system_decision = db.latest_decision_for_package(
+            session, package_id, source="system"
+        )
+        is_override = (
+            system_decision is not None
+            and system_decision.decision != body.decision.value
+        )
         decision = db.create_decision(
-            session, package_id, body.decision.value, body.review_reasons
+            session,
+            package_id,
+            body.decision.value,
+            body.review_reasons,
+            source="reviewer",
+            is_override=is_override,
         )
         result = json.loads(pkg.result_json) if pkg.result_json else {}
         result.update(
             {"decision": decision.decision, "review_reasons": body.review_reasons}
         )
 
+        # Both terminal reviewer choices (ready or blocked) close out the review cycle —
+        # only the legacy "needs_review" value (no longer reviewer-selectable) leaves the
+        # package still awaiting a real decision.
         target_status = (
-            "completed" if decision.decision == "ready_for_processing" else "review_ready"
+            "review_ready" if decision.decision == "needs_review" else "completed"
         )
         if pkg.status != target_status:
             db.transition_package_status(
@@ -1071,6 +1307,9 @@ async def get_policy_evidence(package_id: str):
                 question=pe.question,
                 answer=pe.answer,
                 citations=json.loads(pe.citations_json),
+                field=pe.field,
+                rule=pe.rule,
+                status=pe.status,
             )
             for pe in db.list_policy_evidence_for_package(session, package_id)
         ]
@@ -1180,6 +1419,49 @@ async def export_package(package_id: str):
             policy_answers=[
                 PolicyAnswerExport(**a) for a in result.get("policy_answers", [])
             ],
+        )
+    finally:
+        session.close()
+
+
+@app.get(
+    "/packages/{package_id}/export.xlsx",
+    tags=["reporting"],
+    summary="Export the full claim result as a multi-sheet Excel workbook",
+    responses=ERROR_RESPONSES,
+)
+async def export_package_excel(package_id: str):
+    session = db.SessionLocal()
+    try:
+        pkg = db.get_package(session, package_id)
+        if pkg is None:
+            raise AppError(404, "PACKAGE_NOT_FOUND", "Package does not exist")
+        result = json.loads(pkg.result_json) if pkg.result_json else {}
+        run = db.latest_extraction_run_for_package(session, package_id)
+        fields = db.list_extracted_fields_for_run(session, run.id) if run else []
+        actions = db.latest_review_actions_for_run(session, run.id) if run else {}
+        reviewed_data = review.merge_reviewed_values(
+            result.get("extraction_data") or {}, actions
+        )
+        failures = (
+            db.list_validation_failures_for_run(session, run.id, current_only=True)
+            if run
+            else []
+        )
+        audit_events = db.list_audit_events_for_package(session, package_id)
+
+        xlsx_bytes = build_case_workbook(
+            fields=fields,
+            reviewed_data=reviewed_data,
+            failures=failures,
+            audit_events=audit_events,
+        )
+        return Response(
+            content=xlsx_bytes,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": f'attachment; filename="{package_id}.xlsx"'
+            },
         )
     finally:
         session.close()

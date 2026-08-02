@@ -177,6 +177,24 @@ def test_xactimate_rcv_includes_printed_overhead_profit_and_tax():
     assert failures == []
 
 
+def test_xactimate_rcv_check_skipped_when_no_line_item_data_extracted():
+    """No line items, no printed subtotal, no overhead/profit/tax extracted — there's
+    nothing to reconcile RCV against, so this must not be treated as RCV vs. $0."""
+    from claimflow.domains.base import get as get_domain
+
+    failures = get_domain("xactimate").validate(
+        {
+            "insured_name": "JOHN_ADAMS2",
+            "date_of_loss": "11212014",
+            "total_replacement_cost": 16643.0,
+            "depreciation": 3994.32,
+            "actual_cash_value": 12648.68,
+        }
+    )
+
+    assert all(f["field"] != "total_replacement_cost" for f in failures)
+
+
 def test_validation_failures_carry_severity_and_policy_flag():
     from claimflow.domains.loan import _validate
 

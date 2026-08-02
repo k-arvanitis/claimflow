@@ -10,18 +10,43 @@ def test_get_package_review_returns_fields_and_failures():
     session = db.SessionLocal()
     try:
         pkg = db.create_package(session, str(uuid.uuid4()))
-        doc = db.create_document(session, pkg.id, {
-            "path": "/tmp/claim.pdf", "doc_type": "cms1500",
-            "has_text_layer": True, "scan_quality": None,
-        })
+        doc = db.create_document(
+            session,
+            pkg.id,
+            {
+                "path": "/tmp/claim.pdf",
+                "doc_type": "cms1500",
+                "has_text_layer": True,
+                "scan_quality": None,
+            },
+        )
         run = db.create_extraction_run(session, doc.id, "cms1500", "review", 0.5)
-        fields = db.create_extracted_fields(session, run.id, [
-            {"name": "patient_name", "value": "DOE JOHN", "confidence": 0.91,
-             "grounded": True, "valid": True, "field_status": "found", "evidence": None},
-        ])
-        db.create_validation_failures(session, run.id, [
-            {"field": "diagnosis_codes", "rule": "icd10_lookup", "reason": "bad code"},
-        ])
+        fields = db.create_extracted_fields(
+            session,
+            run.id,
+            [
+                {
+                    "name": "patient_name",
+                    "value": "DOE JOHN",
+                    "confidence": 0.91,
+                    "grounded": True,
+                    "valid": True,
+                    "field_status": "found",
+                    "evidence": None,
+                },
+            ],
+        )
+        db.create_validation_failures(
+            session,
+            run.id,
+            [
+                {
+                    "field": "diagnosis_codes",
+                    "rule": "icd10_lookup",
+                    "reason": "bad code",
+                },
+            ],
+        )
         field_id = fields[0].id
         package_id = pkg.id
         package_status = pkg.status
@@ -55,18 +80,41 @@ def test_get_package_review_exposes_latest_reviewer_action():
     session = db.SessionLocal()
     try:
         pkg = db.create_package(session, str(uuid.uuid4()))
-        doc = db.create_document(session, pkg.id, {
-            "path": "/tmp/claim.pdf", "doc_type": "cms1500",
-            "has_text_layer": True, "scan_quality": None,
-        })
+        doc = db.create_document(
+            session,
+            pkg.id,
+            {
+                "path": "/tmp/claim.pdf",
+                "doc_type": "cms1500",
+                "has_text_layer": True,
+                "scan_quality": None,
+            },
+        )
         run = db.create_extraction_run(session, doc.id, "cms1500", "review", 0.5)
-        db.create_extracted_fields(session, run.id, [
-            {"name": "claim_number", "value": None, "confidence": 0.3,
-             "grounded": False, "valid": True, "field_status": "not_found", "evidence": None},
-        ])
+        db.create_extracted_fields(
+            session,
+            run.id,
+            [
+                {
+                    "name": "claim_number",
+                    "value": None,
+                    "confidence": 0.3,
+                    "grounded": False,
+                    "valid": True,
+                    "field_status": "not_found",
+                    "evidence": None,
+                },
+            ],
+        )
         db.record_review_action(
-            session, run.id, "claim_number", "edit",
-            original_value=None, corrected_value="CLM-9001", reviewer="jane", note="typed in from cover letter",
+            session,
+            run.id,
+            "claim_number",
+            "edit",
+            original_value=None,
+            corrected_value="CLM-9001",
+            reviewer="jane",
+            note="typed in from cover letter",
         )
         package_id = pkg.id
     finally:
@@ -86,15 +134,32 @@ def test_get_package_review_field_without_review_action_has_null_reviewer_fields
     session = db.SessionLocal()
     try:
         pkg = db.create_package(session, str(uuid.uuid4()))
-        doc = db.create_document(session, pkg.id, {
-            "path": "/tmp/claim.pdf", "doc_type": "cms1500",
-            "has_text_layer": True, "scan_quality": None,
-        })
+        doc = db.create_document(
+            session,
+            pkg.id,
+            {
+                "path": "/tmp/claim.pdf",
+                "doc_type": "cms1500",
+                "has_text_layer": True,
+                "scan_quality": None,
+            },
+        )
         run = db.create_extraction_run(session, doc.id, "cms1500", "review", 0.5)
-        db.create_extracted_fields(session, run.id, [
-            {"name": "patient_name", "value": "DOE JOHN", "confidence": 0.91,
-             "grounded": True, "valid": True, "field_status": "found", "evidence": None},
-        ])
+        db.create_extracted_fields(
+            session,
+            run.id,
+            [
+                {
+                    "name": "patient_name",
+                    "value": "DOE JOHN",
+                    "confidence": 0.91,
+                    "grounded": True,
+                    "valid": True,
+                    "field_status": "found",
+                    "evidence": None,
+                },
+            ],
+        )
         package_id = pkg.id
     finally:
         session.close()

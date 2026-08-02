@@ -28,10 +28,6 @@ class ServiceLine(BaseExtraction):
     )
     charges: float = Field(description="Dollar amount charged for this line")
     units: int = Field(description="Number of units/days")
-    modifier: str | None = Field(default=None, description="CPT modifier code")
-    modifier_2: str | None = Field(default=None, description="Second CPT modifier")
-    modifier_3: str | None = Field(default=None, description="Third CPT modifier")
-    modifier_4: str | None = Field(default=None, description="Fourth CPT modifier")
     epsdt_family_plan: str | None = Field(
         default=None, description="EPSDT/family-plan indicator (Box 24H)"
     )
@@ -78,7 +74,9 @@ class CMS1500(BaseExtraction):
     )
     insured_city: str | None = Field(default=None, description="Insured city (Box 7)")
     insured_state: str | None = Field(default=None, description="Insured state (Box 7)")
-    insured_zip: str | None = Field(default=None, description="Insured ZIP code (Box 7)")
+    insured_zip: str | None = Field(
+        default=None, description="Insured ZIP code (Box 7)"
+    )
     insured_phone: str | None = Field(
         default=None, description="Insured telephone including area code (Box 7)"
     )
@@ -112,7 +110,9 @@ class CMS1500(BaseExtraction):
     insured_dob: str | None = Field(
         default=None, description="Insured date of birth MMDDYYYY (Box 11a)"
     )
-    insured_sex: str | None = Field(default=None, description="Insured sex M or F (Box 11a)")
+    insured_sex: str | None = Field(
+        default=None, description="Insured sex M or F (Box 11a)"
+    )
     other_claim_id_qualifier: str | None = Field(
         default=None, description="Other claim ID qualifier (Box 11b)"
     )
@@ -237,7 +237,8 @@ class CMS1500(BaseExtraction):
         default=None, description="Physician or supplier signature/name in Box 31"
     )
     physician_signature_date: str | None = Field(
-        default=None, description="Physician or supplier signature date MMDDYYYY (Box 31)"
+        default=None,
+        description="Physician or supplier signature date MMDDYYYY (Box 31)",
     )
     service_date: str | None = Field(
         default=None,
@@ -350,6 +351,8 @@ def _validate(data: dict) -> list[ValidationFailure]:
                     reason=f"Line sum ${computed} does not match total charge ${total}",
                     severity="warning",
                     policy_required=True,
+                    machine_value=f"${computed}",
+                    expected_value=f"${total}",
                 )
             )
     except InvalidOperation:
@@ -456,21 +459,21 @@ HEALTH = Domain(
         "checks NPI format, ICD-10/CPT lookup membership, and arithmetic; "
         "policy citations come from official CMS manuals, not synthetic text."
     ),
+    client_name_field="patient_name",
 )
 
 register(HEALTH)
 
 
-class EOB(BaseExtraction):
-    payer_name: str | None = Field(
-        default=None, description="Insurer/Medicare name issuing this notice"
-    )
-    patient_name: str = Field(description="Patient name")
-    provider_name: str | None = Field(
-        default=None, description="Rendering provider/facility name"
-    )
+class EOBClaim(BaseExtraction):
+    """One claim block on the EOB — most EOBs list more than one claim per page
+    (one per visit/provider), each with its own claim number and amount totals."""
+
     claim_number: str | None = Field(
         default=None, description="Claim number; null if the field is blank"
+    )
+    provider_name: str | None = Field(
+        default=None, description="Rendering provider/facility name for this claim"
     )
     service_date: str | None = Field(
         default=None, description="Date of service MMDDYYYY"
@@ -502,8 +505,18 @@ class EOB(BaseExtraction):
     denial_or_remark_codes: list[str] = Field(
         default_factory=list, description="Remark/denial codes (e.g. CO-45)"
     )
+
+
+class EOB(BaseExtraction):
+    payer_name: str | None = Field(
+        default=None, description="Insurer/Medicare name issuing this notice"
+    )
+    patient_name: str = Field(description="Patient name")
     is_bill: bool = Field(
         description="True only if the document presents itself as a bill requiring payment"
+    )
+    claims: list[EOBClaim] = Field(
+        description="One entry per claim block on this EOB — extract every claim present, not just the first"
     )
 
 
@@ -545,69 +558,74 @@ def _validate_eob(data: dict) -> list[ValidationFailure]:
             )
         )
 
-    for field in (
-        "provider_charges",
-        "allowed_charges",
-        "plan_paid",
-        "patient_responsibility",
-    ):
-        val = data.get(field)
-        try:
-            if val is not None and float(val) < 0:
-                failures.append(
-                    ValidationFailure(
-                        field=field,
-                        rule="negative_amount",
-                        reason=f"{field} cannot be negative",
-                        severity="error",
-                        policy_required=False,
+    claims = data.get("claims") or []
+
+    for claim in claims:
+        for field in (
+            "provider_charges",
+            "allowed_charges",
+            "plan_paid",
+            "patient_responsibility",
+        ):
+            val = claim.get(field)
+            try:
+                if val is not None and float(val) < 0:
+                    failures.append(
+                        ValidationFailure(
+                            field="claims",
+                            rule="negative_amount",
+                            reason=f"{field} cannot be negative",
+                            severity="error",
+                            policy_required=False,
+                        )
                     )
-                )
-        except (TypeError, ValueError):
-            pass
+            except (TypeError, ValueError):
+                pass
 
-    provider_charges, allowed_charges = (
-        data.get("provider_charges"),
-        data.get("allowed_charges"),
-    )
-    if provider_charges is not None and allowed_charges is not None:
-        try:
-            if float(provider_charges) < float(allowed_charges):
-                failures.append(
-                    ValidationFailure(
-                        field="provider_charges",
-                        rule="amount_consistency",
-                        reason=f"provider_charges ${provider_charges} is less than allowed_charges ${allowed_charges}",
-                        severity="warning",
-                        policy_required=False,
+        provider_charges, allowed_charges = (
+            claim.get("provider_charges"),
+            claim.get("allowed_charges"),
+        )
+        if provider_charges is not None and allowed_charges is not None:
+            try:
+                if float(provider_charges) < float(allowed_charges):
+                    failures.append(
+                        ValidationFailure(
+                            field="claims",
+                            rule="amount_consistency",
+                            reason=f"provider_charges ${provider_charges} is less than allowed_charges ${allowed_charges}",
+                            severity="warning",
+                            policy_required=False,
+                            machine_value=f"${provider_charges}",
+                            expected_value=f">= ${allowed_charges}",
+                        )
                     )
+            except (TypeError, ValueError):
+                pass
+
+        claim_number = claim.get("claim_number")
+        if claim_number and not re.search(r"\d", str(claim_number)):
+            failures.append(
+                ValidationFailure(
+                    field="claims",
+                    rule="mandatory",
+                    reason=f"'{claim_number}' has no digits — looks like a placeholder, not a claim number",
+                    severity="error",
+                    policy_required=False,
                 )
-        except (TypeError, ValueError):
-            pass
-
-    claim_number = data.get("claim_number")
-    if claim_number and not re.search(r"\d", str(claim_number)):
-        failures.append(
-            ValidationFailure(
-                field="claim_number",
-                rule="mandatory",
-                reason=f"'{claim_number}' has no digits — looks like a placeholder, not a claim number",
-                severity="error",
-                policy_required=False,
             )
-        )
 
-    service_date = _parse_date(data.get("service_date") or "")
-    if service_date and service_date > date.today():
-        failures.append(
-            ValidationFailure(
-                field="service_date",
-                rule="date_window",
-                reason="Service date is in the future",
-                severity="error",
-                policy_required=False,
+        service_date = _parse_date(claim.get("service_date") or "")
+        if service_date and service_date > date.today():
+            failures.append(
+                ValidationFailure(
+                    field="claims",
+                    rule="date_window",
+                    reason="Service date is in the future",
+                    severity="error",
+                    policy_required=False,
+                )
             )
-        )
 
     return failures
 
@@ -624,6 +642,7 @@ EOB_DOMAIN = Domain(
     validate=_validate_eob,
     display_name="Explanation of Benefits",
     policy_collection="health",
+    client_name_field="patient_name",
 )
 register(EOB_DOMAIN)
 
@@ -639,5 +658,6 @@ MEDICARE_SUMMARY_NOTICE = Domain(
     validate=_validate_eob,
     display_name="Medicare Summary Notice",
     policy_collection="health",
+    client_name_field="patient_name",
 )
 register(MEDICARE_SUMMARY_NOTICE)

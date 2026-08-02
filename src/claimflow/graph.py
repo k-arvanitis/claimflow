@@ -27,7 +27,9 @@ def build_graph():
     g.set_entry_point("ingest")
     g.add_edge("ingest", "extract")
     g.add_edge("extract", "validate")
-    g.add_conditional_edges("validate", _should_retrieve, {"retrieve": "retrieve", "review": "review"})
+    g.add_conditional_edges(
+        "validate", _should_retrieve, {"retrieve": "retrieve", "review": "review"}
+    )
     g.add_edge("retrieve", "review")
     g.add_edge("review", END)
 

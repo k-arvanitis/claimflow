@@ -8,6 +8,7 @@ EXPECTED_ROUTES = {
     ("GET", "/settings"),
     ("POST", "/packages"),
     ("GET", "/packages"),
+    ("GET", "/packages/export.xlsx"),
     ("GET", "/packages/{package_id}"),
     ("DELETE", "/packages/{package_id}"),
     ("POST", "/packages/{package_id}/process"),
@@ -25,8 +26,16 @@ EXPECTED_ROUTES = {
     ("GET", "/packages/{package_id}/policy-evidence"),
     ("GET", "/packages/{package_id}/audit"),
     ("GET", "/packages/{package_id}/export"),
+    ("GET", "/packages/{package_id}/export.xlsx"),
     ("GET", "/domain-packs"),
     ("GET", "/domain-packs/{key}"),
+    ("GET", "/llm-credentials"),
+    ("POST", "/llm-credentials"),
+    ("DELETE", "/llm-credentials"),
+    ("GET", "/policies"),
+    ("POST", "/policies"),
+    ("DELETE", "/policies/{filename}"),
+    ("GET", "/policies/{filename}/file"),
 }
 
 
@@ -42,7 +51,9 @@ def test_openapi_schema_has_every_route_with_response_model():
                 continue
             responses = operation["responses"]
             success = responses.get("200") or responses.get("201")
-            assert "content" in success, f"{method.upper()} {path} has no typed 200 response"
+            assert "content" in success, (
+                f"{method.upper()} {path} has no typed 200 response"
+            )
             assert "404" in responses or "422" in responses or method.upper() == "GET"
 
     assert found == EXPECTED_ROUTES

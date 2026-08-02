@@ -14,6 +14,7 @@ def session(tmp_path):
 
 def _pkg_with_decision(session, package_id, status, decision=None, decision_age_days=0):
     from datetime import datetime, timedelta, timezone
+
     session.add(db.Package(id=package_id, status=status))
     session.commit()
     if decision:
@@ -53,7 +54,9 @@ def test_dashboard_summary_uses_latest_decision_not_first(session):
     session.add(db.Package(id="p1", status="review_ready"))
     session.commit()
     db.create_decision(session, "p1", "blocked_or_incomplete", [])
-    db.create_decision(session, "p1", "needs_review", [])  # reviewer downgraded it later
+    db.create_decision(
+        session, "p1", "needs_review", []
+    )  # reviewer downgraded it later
 
     summary = db.compute_dashboard_summary(session)
 
@@ -79,16 +82,42 @@ def test_straight_through_rate_zero_when_no_decisions(session):
     assert summary["straight_through_rate"] == 0.0
 
 
+def test_blocked_decision_completes_status_but_counts_as_escalated_not_approved(
+    session,
+):
+    # Reviewer decisions on "blocked_or_incomplete" transition status to "completed"
+    # too (same as "ready_for_processing") — status alone can't distinguish them.
+    _pkg_with_decision(session, "p1", "completed", "blocked_or_incomplete")
+    _pkg_with_decision(session, "p2", "completed", "ready_for_processing")
+
+    summary = db.compute_dashboard_summary(session)
+
+    assert summary["approved"] == 1
+    assert summary["escalated"] == 1
+
+
 def test_top_validation_failures_ranked_by_count(session):
     session.add(db.Package(id="p1", status="review_ready"))
-    session.add(db.Document(id="d1", package_id="p1", path="a.pdf", doc_type="cms1500", has_text_layer=True))
+    session.add(
+        db.Document(
+            id="d1",
+            package_id="p1",
+            path="a.pdf",
+            doc_type="cms1500",
+            has_text_layer=True,
+        )
+    )
     session.commit()
     run = db.create_extraction_run(session, "d1", "cms1500", "review", 0.7)
-    db.create_validation_failures(session, run.id, [
-        {"field": "npi", "rule": "npi_format", "reason": "x"},
-        {"field": "npi2", "rule": "npi_format", "reason": "x"},
-        {"field": "dob", "rule": "date_range", "reason": "x"},
-    ])
+    db.create_validation_failures(
+        session,
+        run.id,
+        [
+            {"field": "npi", "rule": "npi_format", "reason": "x"},
+            {"field": "npi2", "rule": "npi_format", "reason": "x"},
+            {"field": "dob", "rule": "date_range", "reason": "x"},
+        ],
+    )
 
     summary = db.compute_dashboard_summary(session)
 
@@ -96,14 +125,42 @@ def test_top_validation_failures_ranked_by_count(session):
     assert summary["top_validation_failures"][1] == {"rule": "date_range", "count": 1}
 
 
+def test_packages_by_day_is_zero_filled_over_30_days(session):
+    from datetime import datetime, timezone
+
+    session.add(db.Package(id="p1", status="processing"))
+    session.commit()
+
+    summary = db.compute_dashboard_summary(session)
+
+    assert len(summary["packages_by_day"]) == 30
+    today = datetime.now(timezone.utc).date().isoformat()
+    by_date = {d["date"]: d["count"] for d in summary["packages_by_day"]}
+    assert by_date[today] == 1
+    assert summary["packages_by_day"][-1]["date"] == today
+    assert sum(d["count"] for d in summary["packages_by_day"]) == 1
+
+
 def test_top_validation_failures_excludes_superseded(session):
     session.add(db.Package(id="p1", status="review_ready"))
-    session.add(db.Document(id="d1", package_id="p1", path="a.pdf", doc_type="cms1500", has_text_layer=True))
+    session.add(
+        db.Document(
+            id="d1",
+            package_id="p1",
+            path="a.pdf",
+            doc_type="cms1500",
+            has_text_layer=True,
+        )
+    )
     session.commit()
     run = db.create_extraction_run(session, "d1", "cms1500", "review", 0.7)
-    db.create_validation_failures(session, run.id, [{"field": "npi", "rule": "npi_format", "reason": "x"}])
+    db.create_validation_failures(
+        session, run.id, [{"field": "npi", "rule": "npi_format", "reason": "x"}]
+    )
     db.supersede_validation_failures(session, run.id)
-    db.create_validation_failures(session, run.id, [{"field": "dob", "rule": "date_range", "reason": "x"}])
+    db.create_validation_failures(
+        session, run.id, [{"field": "dob", "rule": "date_range", "reason": "x"}]
+    )
 
     summary = db.compute_dashboard_summary(session)
 

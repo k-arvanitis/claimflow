@@ -15,14 +15,18 @@ def review_node(state: ClaimState) -> dict:
     if confidence < settings.escalation_threshold:
         return {
             "decision": "blocked_or_incomplete",
-            "review_reasons": [f"Overall confidence {confidence:.0%} below escalation threshold"],
+            "review_reasons": [
+                f"Overall confidence {confidence:.0%} below escalation threshold"
+            ],
         }
 
     reasons = [f"{f['field']}: {f['reason']}" for f in failures]
 
     if failures or confidence < settings.confidence_threshold:
         if confidence < settings.confidence_threshold:
-            reasons.append(f"Overall confidence {confidence:.0%} below review threshold")
+            reasons.append(
+                f"Overall confidence {confidence:.0%} below review threshold"
+            )
         return {"decision": "needs_review", "review_reasons": reasons}
 
     return {"decision": "ready_for_processing", "review_reasons": []}

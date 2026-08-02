@@ -16,8 +16,13 @@ class PackageSummary(BaseModel):
     status: PackageStatus
     created_at: datetime
     updated_at: datetime
+    client_name: str | None = None
+    client_key: str | None = None
     domain: str | None = None
     decision: str | None = None
+    system_recommendation: str | None = None
+    reviewer_outcome: str | None = None
+    reviewer_override: bool = False
     overall_confidence: float | None = None
     document_count: int
     validation_failure_count: int
@@ -30,8 +35,12 @@ class PackageDetailResponse(BaseModel):
     error: str | None
     created_at: datetime
     updated_at: datetime
+    client_name: str | None = None
     domain: str | None = None
     decision: str | None = None
+    system_recommendation: str | None = None
+    reviewer_outcome: str | None = None
+    reviewer_override: bool = False
     review_reasons: list[str] = []
     overall_confidence: float | None = None
     document_count: int = 0

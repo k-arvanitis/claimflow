@@ -1,4 +1,5 @@
 """Mocked/offline tests for the real/public eval layer — no live downloads, no LLM calls."""
+
 import json
 import sys
 from pathlib import Path
@@ -12,6 +13,7 @@ sys.path.insert(0, str(_EVAL_ROOT / "scripts"))
 import metrics as m  # noqa: E402
 
 # ── Schema validation ────────────────────────────────────────────────────────
+
 
 def _load_schema(name: str) -> dict:
     return json.loads((_EVAL_ROOT / "schema" / name).read_text())
@@ -36,9 +38,16 @@ def test_manifest_schema_rejects_missing_required_field():
 def test_manifest_schema_rejects_bad_sha256_format():
     schema = _load_schema("manifest.schema.json")
     entry = {
-        "doc_id": "x", "dataset": "y", "domain": "health", "document_type": "z",
-        "source_url": "https://example.com", "local_path": "a/b", "accessed_at": "2026-01-01T00:00:00Z",
-        "sha256": "not-a-real-hash", "license_public_use_notes": "n", "pii_status": "public_non_pii",
+        "doc_id": "x",
+        "dataset": "y",
+        "domain": "health",
+        "document_type": "z",
+        "source_url": "https://example.com",
+        "local_path": "a/b",
+        "accessed_at": "2026-01-01T00:00:00Z",
+        "sha256": "not-a-real-hash",
+        "license_public_use_notes": "n",
+        "pii_status": "public_non_pii",
         "split": "test",
     }
     with pytest.raises(jsonschema.ValidationError):
@@ -48,7 +57,8 @@ def test_manifest_schema_rejects_bad_sha256_format():
 def test_gold_fields_schema_accepts_real_gold_files():
     schema = _load_schema("gold_fields.schema.json")
     gold_files = [
-        p for domain in ("health", "property", "loan")
+        p
+        for domain in ("health", "property", "loan")
         for p in (_EVAL_ROOT / "datasets" / domain / "gold").glob("*.json")
     ]
     assert gold_files, "expected at least one gold annotation file"
@@ -66,13 +76,18 @@ def test_gold_fields_schema_rejects_bad_task_type():
 def test_results_schema_accepts_minimal_row():
     schema = _load_schema("results.schema.json")
     row = {
-        "run_id": "r1", "dataset": "d", "doc_id": "x", "domain": "property",
-        "task_type": "extraction", "passed": True,
+        "run_id": "r1",
+        "dataset": "d",
+        "doc_id": "x",
+        "domain": "property",
+        "task_type": "extraction",
+        "passed": True,
     }
     jsonschema.validate(row, schema)
 
 
 # ── sha256 / manifest helpers ────────────────────────────────────────────────
+
 
 def test_sha256_matches_known_value(tmp_path):
     from download_real_public import _sha256
@@ -80,7 +95,10 @@ def test_sha256_matches_known_value(tmp_path):
     path = tmp_path / "f.txt"
     path.write_bytes(b"hello world")
     # Known SHA-256 test vector for the literal bytes b"hello world".
-    assert _sha256(path) == "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+    assert (
+        _sha256(path)
+        == "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+    )
 
 
 def test_manifest_upsert_replaces_existing_entry(tmp_path, monkeypatch):
@@ -108,8 +126,11 @@ def test_load_manifest_returns_empty_list_when_missing(tmp_path, monkeypatch):
 
 # ── Metrics — pure functions, no I/O ─────────────────────────────────────────
 
+
 def test_token_precision_recall_f1_perfect_match():
-    r = m.token_precision_recall_f1("the quick brown fox", ["the", "quick", "brown", "fox"])
+    r = m.token_precision_recall_f1(
+        "the quick brown fox", ["the", "quick", "brown", "fox"]
+    )
     assert r["precision"] == 1.0
     assert r["recall"] == 1.0
     assert r["f1"] == 1.0
@@ -130,7 +151,10 @@ def test_bbox_iou_no_overlap():
 
 
 def test_field_exact_accuracy_counts_correctly():
-    gold = [{"field_name": "a", "expected_value": "X"}, {"field_name": "b", "expected_value": "Y"}]
+    gold = [
+        {"field_name": "a", "expected_value": "X"},
+        {"field_name": "b", "expected_value": "Y"},
+    ]
     correct, total = m.field_exact_accuracy({"a": "X", "b": "Z"}, gold)
     assert (correct, total) == (1, 2)
 

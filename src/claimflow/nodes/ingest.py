@@ -8,7 +8,9 @@ from claimflow.domains.base import all_domains
 from claimflow.state import ClaimState, IngestedDoc
 
 _TEXT_THRESHOLD = 50
-_OCR_LOW_CONF_THRESHOLD = 20  # chars; below this, OCR likely failed on a low-quality scan
+_OCR_LOW_CONF_THRESHOLD = (
+    20  # chars; below this, OCR likely failed on a low-quality scan
+)
 
 # fitz opens PDFs and raster images natively (an image becomes a 1-page pseudo-PDF).
 # DOCX has no such native support, so it's converted to PDF first — after that every
@@ -22,8 +24,18 @@ def _office_to_pdf(path: Path, out_dir: Path) -> Path:
     """Convert a DOCX to PDF via headless LibreOffice."""
     out_dir.mkdir(parents=True, exist_ok=True)
     subprocess.run(
-        ["libreoffice", "--headless", "--convert-to", "pdf", "--outdir", str(out_dir), str(path)],
-        check=True, capture_output=True, timeout=60,
+        [
+            "libreoffice",
+            "--headless",
+            "--convert-to",
+            "pdf",
+            "--outdir",
+            str(out_dir),
+            str(path),
+        ],
+        check=True,
+        capture_output=True,
+        timeout=60,
     )
     pdf_path = out_dir / f"{path.stem}.pdf"
     if not pdf_path.exists():
@@ -70,12 +82,21 @@ def _classify_doc_type(text: str) -> tuple[str, str | None]:
 
 def ingest_node(state: ClaimState) -> dict:
     pkg = Path(state["package_dir"])
-    sources = sorted(p for p in pkg.iterdir() if p.suffix.lower() in INGESTIBLE_SUFFIXES)
+    sources = sorted(
+        p for p in pkg.iterdir() if p.suffix.lower() in INGESTIBLE_SUFFIXES
+    )
     if not sources:
-        return {"error": f"No supported documents found in {pkg}", "documents": [], "domain": None}
+        return {
+            "error": f"No supported documents found in {pkg}",
+            "documents": [],
+            "domain": state.get("domain"),
+            "detected_domain": None,
+            "domain_mismatch": False,
+        }
 
     domain_keys = {d.doc_type for d in all_domains()}
     overrides: dict[str, str] = state.get("doc_type_overrides") or {}
+    requested_domain = state.get("domain")
     docs: list[IngestedDoc] = []
     ocr_log: list[str] = []
     detected_domain: str | None = None
@@ -96,7 +117,9 @@ def ingest_node(state: ClaimState) -> dict:
             scan_quality: float | None = None
 
             if page1 and page1.ocr_used:
-                ocr_log.append(f"{name}: page 1 has no text layer — falling back to OCR")
+                ocr_log.append(
+                    f"{name}: page 1 has no text layer — falling back to OCR"
+                )
                 scan_quality = _scan_quality(first_page_text)
                 if len(first_page_text.strip()) < _OCR_LOW_CONF_THRESHOLD:
                     ocr_log.append(
@@ -110,16 +133,37 @@ def ingest_node(state: ClaimState) -> dict:
                 doc_type, classification_reason = _classify_doc_type(first_page_text)
             if doc_type in domain_keys and detected_domain is None:
                 detected_domain = doc_type
-            docs.append(IngestedDoc(
-                path=str(pdf_path), doc_type=doc_type,
-                has_text_layer=has_text, scan_quality=scan_quality,
-                classification_reason=classification_reason,
-            ))
+            docs.append(
+                IngestedDoc(
+                    path=str(pdf_path),
+                    doc_type=doc_type,
+                    has_text_layer=has_text,
+                    scan_quality=scan_quality,
+                    classification_reason=classification_reason,
+                )
+            )
         except Exception:
             ocr_log.append(f"{name}: ingest failed, marked unknown")
-            docs.append(IngestedDoc(
-                path=str(src_path), doc_type="unknown", has_text_layer=False, scan_quality=None,
-                classification_reason=None,
-            ))
+            docs.append(
+                IngestedDoc(
+                    path=str(src_path),
+                    doc_type="unknown",
+                    has_text_layer=False,
+                    scan_quality=None,
+                    classification_reason=None,
+                )
+            )
 
-    return {"documents": docs, "domain": detected_domain, "ocr_log": ocr_log}
+    # A user-selected domain is authoritative and drives schema/validators/policy — it is
+    # never silently replaced by content classification. Detection only produces a warning.
+    resolved_domain = requested_domain or detected_domain
+    domain_mismatch = bool(
+        requested_domain and detected_domain and requested_domain != detected_domain
+    )
+    return {
+        "documents": docs,
+        "domain": resolved_domain,
+        "detected_domain": detected_domain,
+        "domain_mismatch": domain_mismatch,
+        "ocr_log": ocr_log,
+    }

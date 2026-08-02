@@ -39,6 +39,8 @@ class ReviewValidationFailure(BaseModel):
     reason: str
     severity: str
     policy_required: bool
+    machine_value: str | None = None
+    expected_value: str | None = None
 
 
 class PackageReviewResponse(BaseModel):

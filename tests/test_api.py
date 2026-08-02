@@ -897,6 +897,7 @@ def test_dashboard_summary_endpoint():
         "processing_errors",
         "straight_through_rate",
         "top_validation_failures",
+        "packages_by_day",
     }
 
 
