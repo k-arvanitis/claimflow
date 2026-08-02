@@ -1,76 +1,26 @@
 "use client";
 
-import { FileText, RefreshCw, ScanLine, ScrollText } from "lucide-react";
+import { FileText, ScanLine, ScrollText } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useDocuments, useReclassifyDocument, useReprocessPackage } from "@/lib/queries";
-import type { components } from "@/lib/api-types";
+import { useDocuments } from "@/lib/queries";
 import { cn } from "@/lib/utils";
-import { toast } from "sonner";
-
-const DOC_TYPES: components["schemas"]["DocumentType"][] = [
-  "cms1500",
-  "eob",
-  "medicare_summary_notice",
-  "xactimate",
-  "declarations_page",
-  "loan",
-  "sba_form_413",
-  "sba_form_2202",
-  "medical_bill",
-  "insurance_policy",
-  "denial_letter",
-  "clinical_note",
-  "lab_report",
-  "discharge_summary",
-  "referral_letter",
-  "prior_authorization_letter",
-  "eligibility_benefits_verification",
-  "ub04_cms1450",
-  "loss_report",
-  "contractor_invoice",
-  "adjuster_notes",
-  "roof_inspection_report",
-  "damage_photo",
-  "material_receipt",
-  "fire_report",
-  "police_report",
-  "tax_return",
-  "bank_statement",
-  "balance_sheet",
-  "income_statement",
-  "id_document",
-  "supporting_exhibit",
-  "profit_loss_statement",
-  "debt_schedule",
-  "business_license",
-  "articles_of_incorporation",
-  "payroll_report",
-  "w2_1099_paystub",
-  "unknown",
-];
 
 export function DocumentList({
   packageId,
   selectedDocumentId,
   onSelect,
+  extractedDocType,
 }: {
   packageId: string;
   selectedDocumentId: string | null;
   onSelect: (documentId: string) => void;
+  /** The package's domain — only the document matching it gets deep field
+   * extraction today; every other document is classified but not extracted.
+   * Pass null to hide the extracted/classified-only distinction entirely. */
+  extractedDocType?: string | null;
 }) {
   const { data: documents, isLoading } = useDocuments(packageId);
-  const reclassify = useReclassifyDocument(packageId);
-  const reprocess = useReprocessPackage(packageId);
 
   if (isLoading) {
     return <div className="p-3 text-sm text-muted-foreground">Loading documents…</div>;
@@ -85,21 +35,45 @@ export function DocumentList({
       {documents.map((doc) => (
         <div
           key={doc.document_id}
+          role="button"
+          tabIndex={0}
+          onClick={() => onSelect(doc.document_id)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") onSelect(doc.document_id);
+          }}
           className={cn(
-            "flex flex-col gap-1.5 rounded-md border p-2 text-sm transition-colors",
+            "flex cursor-pointer flex-col gap-1.5 rounded-md border p-2 text-sm transition-colors",
             selectedDocumentId === doc.document_id ? "border-primary bg-accent/60" : "border-transparent hover:bg-accent/30"
           )}
         >
-          <button
-            className="flex items-center gap-2 text-left"
-            onClick={() => onSelect(doc.document_id)}
-          >
+          <div className="flex items-center gap-2">
             <FileText className="size-4 shrink-0 text-muted-foreground" />
             <span className="min-w-0 flex-1 truncate font-medium">{doc.filename}</span>
-          </button>
+          </div>
 
           <div className="flex flex-wrap items-center gap-1.5 pl-6">
             <Badge variant="secondary">{doc.doc_type}</Badge>
+            {extractedDocType != null && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Badge
+                    variant="outline"
+                    className={
+                      doc.doc_type === extractedDocType
+                        ? "border-success text-success"
+                        : "text-muted-foreground"
+                    }
+                  >
+                    {doc.doc_type === extractedDocType ? "Extracted" : "Classified only"}
+                  </Badge>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {doc.doc_type === extractedDocType
+                    ? "This package's primary document type — fields, confidence, and validation come from here."
+                    : "Recognized and included in this package, but not deep-extracted — only the package's primary document type is."}
+                </TooltipContent>
+              </Tooltip>
+            )}
             {doc.manually_overridden && <Badge variant="outline">manually overridden</Badge>}
             <Tooltip>
               <TooltipTrigger asChild>
@@ -114,54 +88,11 @@ export function DocumentList({
               <span className="text-xs text-muted-foreground">scan quality {doc.scan_quality.toFixed(2)}</span>
             )}
           </div>
-
-          <div className="flex items-center gap-2 pl-6">
-            <Select
-              value={doc.doc_type}
-              onValueChange={async (value) => {
-                try {
-                  await reclassify.mutateAsync({
-                    documentId: doc.document_id,
-                    docType: value as components["schemas"]["DocumentType"],
-                  });
-                  toast.success("Document reclassified — reprocess to apply");
-                } catch {
-                  toast.error("Reclassification failed");
-                }
-              }}
-            >
-              <SelectTrigger size="sm" className="h-7 w-40 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  {DOC_TYPES.map((t) => (
-                    <SelectItem key={t} value={t}>
-                      {t}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-            {doc.manually_overridden && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 text-xs"
-                onClick={async () => {
-                  try {
-                    await reprocess.mutateAsync();
-                    toast.success("Reprocessing started");
-                  } catch {
-                    toast.error("Could not start reprocessing");
-                  }
-                }}
-              >
-                <RefreshCw data-icon="inline-start" />
-                Reprocess
-              </Button>
-            )}
-          </div>
+          {extractedDocType != null && doc.doc_type !== extractedDocType && (
+            <p className="pl-6 text-xs text-muted-foreground">
+              Recognized, not deep-extracted — only the package&apos;s primary document type is.
+            </p>
+          )}
         </div>
       ))}
     </div>

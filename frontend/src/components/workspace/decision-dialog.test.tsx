@@ -18,7 +18,7 @@ describe("DecisionDialog", () => {
   it("requires a reason before allowing an escalation to be confirmed", async () => {
     render(
       withQueryClient(
-        <DecisionDialog packageId="p1" pending="blocked_or_incomplete" onClose={vi.fn()} unresolvedFailureCount={0} status="review_ready" />
+        <DecisionDialog packageId="p1" pending="blocked_or_incomplete" onClose={vi.fn()} unresolvedFailureCount={0} status="review_ready" currentDecision="needs_review" />
       )
     );
 
@@ -32,7 +32,7 @@ describe("DecisionDialog", () => {
   it("warns about unresolved validation failures before approval", () => {
     render(
       withQueryClient(
-        <DecisionDialog packageId="p1" pending="ready_for_processing" onClose={vi.fn()} unresolvedFailureCount={2} status="review_ready" />
+        <DecisionDialog packageId="p1" pending="ready_for_processing" onClose={vi.fn()} unresolvedFailureCount={2} status="review_ready" currentDecision="ready_for_processing" />
       )
     );
 
@@ -43,7 +43,7 @@ describe("DecisionDialog", () => {
     const onClose = vi.fn();
     render(
       withQueryClient(
-        <DecisionDialog packageId="p1" pending="ready_for_processing" onClose={onClose} unresolvedFailureCount={0} status="review_ready" />
+        <DecisionDialog packageId="p1" pending="ready_for_processing" onClose={onClose} unresolvedFailureCount={0} status="review_ready" currentDecision="ready_for_processing" />
       )
     );
 

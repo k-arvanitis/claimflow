@@ -1,6 +1,7 @@
 "use client";
 
-import { use, useMemo, useState } from "react";
+import { use, useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { PanelLeft } from "lucide-react";
 import {
   ResizableHandle,
@@ -14,11 +15,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertTriangle } from "lucide-react";
 
-import { usePackage, useDocuments, usePackageReview } from "@/lib/queries";
-import type { PackageResult } from "@/lib/package-result";
+import { usePackage, useDocuments, usePackageReview, useDomainPack, invalidatePackage } from "@/lib/queries";
+import type { PackageResult, ValidationFailure } from "@/lib/package-result";
 import { PackageHeader } from "@/components/workspace/package-header";
 import { DocumentList } from "@/components/workspace/document-list";
-import { DocumentViewer, type SelectedEvidence } from "@/components/workspace/document-viewer";
+import { DocumentViewer, type EvidenceFocus } from "@/components/workspace/document-viewer";
 import { OverviewTab } from "@/components/workspace/overview-tab";
 import { FieldsTab, type ReviewState, type ReviewAction } from "@/components/workspace/fields-tab";
 import { ValidationTab } from "@/components/workspace/validation-tab";
@@ -29,21 +30,35 @@ import { DecisionDialog } from "@/components/workspace/decision-dialog";
 export default function PackageWorkspacePage({ params }: { params: Promise<{ packageId: string }> }) {
   const { packageId } = use(params);
 
+  const queryClient = useQueryClient();
   const pkg = usePackage(packageId, { poll: true });
+  const domainPack = useDomainPack(pkg.data?.domain ?? null);
   const { data: documents } = useDocuments(packageId);
   const review = usePackageReview(packageId);
 
+  // usePackage polls itself while processing, but documents/review/audit/policy are
+  // separate queries fetched once on mount — without this they'd keep showing empty
+  // results after background processing finishes, until the user reloads the page.
+  const previousStatus = useRef(pkg.data?.status);
+  useEffect(() => {
+    const status = pkg.data?.status;
+    if (status && previousStatus.current && status !== previousStatus.current) {
+      invalidatePackage(queryClient, packageId);
+    }
+    previousStatus.current = status;
+  }, [pkg.data?.status, queryClient, packageId]);
+
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
-  const [evidence, setEvidence] = useState<SelectedEvidence | null>(null);
   const [tab, setTab] = useState("overview");
   const [pendingDecision, setPendingDecision] = useState<
     "ready_for_processing" | "needs_review" | "blocked_or_incomplete" | null
   >(null);
   const [reviewed, setReviewed] = useState<ReviewState>({});
+  const [evidenceFocus, setEvidenceFocus] = useState<EvidenceFocus | null>(null);
 
   const result = pkg.data?.result as PackageResult | null | undefined;
   const fields = useMemo(() => result?.extraction_fields ?? [], [result]);
-  const validationFailures = review.data?.validation_failures ?? result?.validation_failures ?? [];
+  const validationFailures = (review.data?.validation_failures ?? result?.validation_failures ?? []) as ValidationFailure[];
 
   const fieldIds = useMemo(() => {
     const map: Record<string, number> = {};
@@ -70,27 +85,13 @@ export default function PackageWorkspacePage({ params }: { params: Promise<{ pac
     .filter((d) => d.scan_quality != null && d.scan_quality < 0.5)
     .map((d) => `${d.filename}: low scan quality (${d.scan_quality?.toFixed(2)})`);
 
-  function handleSelectEvidence(next: SelectedEvidence) {
-    setEvidence(next);
-    if (next.documentId) setSelectedDocumentId(next.documentId);
-    setTab((t) => t); // keep current tab; viewer updates independently
-  }
-
-  function handleSelectFieldFromValidation(fieldName: string) {
-    setTab("fields");
-    const field = fields.find((f) => f.name === fieldName);
-    if (field?.evidence) {
-      handleSelectEvidence({
-        documentId: primaryDocument?.document_id ?? "",
-        page: field.evidence.page ?? 1,
-        bbox: field.evidence.bbox,
-        quote: field.evidence.text,
-      });
-    }
-  }
-
   function handleReviewed(fieldName: string, action: ReviewAction, value: unknown) {
     setReviewed((prev) => ({ ...prev, [fieldName]: { action, value } }));
+  }
+
+  function handleFocusEvidence(focus: EvidenceFocus) {
+    setSelectedDocumentId(focus.documentId);
+    setEvidenceFocus(focus);
   }
 
   if (pkg.isLoading) {
@@ -101,14 +102,19 @@ export default function PackageWorkspacePage({ params }: { params: Promise<{ pac
     return (
       <Alert variant="destructive">
         <AlertTriangle />
-        <AlertTitle>Package not found</AlertTitle>
-        <AlertDescription>Could not load this package. It may not exist or the API is unreachable.</AlertDescription>
+        <AlertTitle>Case not found</AlertTitle>
+        <AlertDescription>Could not load this case. It may not exist or the API is unreachable.</AlertDescription>
       </Alert>
     );
   }
 
   const documentListPanel = (
-    <DocumentList packageId={packageId} selectedDocumentId={activeDocumentId} onSelect={setSelectedDocumentId} />
+    <DocumentList
+      packageId={packageId}
+      selectedDocumentId={activeDocumentId}
+      onSelect={setSelectedDocumentId}
+      extractedDocType={pkg.data.domain ?? null}
+    />
   );
 
   const reviewPanel = (
@@ -124,7 +130,9 @@ export default function PackageWorkspacePage({ params }: { params: Promise<{ pac
         <TabsContent value="overview">
           <OverviewTab
             status={pkg.data.status}
-            decision={pkg.data.decision ?? null}
+            systemRecommendation={pkg.data.system_recommendation ?? null}
+            reviewerOutcome={pkg.data.reviewer_outcome ?? null}
+            reviewerOverride={pkg.data.reviewer_override ?? false}
             confidence={pkg.data.overall_confidence ?? null}
             documentCount={pkg.data.document_count ?? documents?.length ?? 0}
             fields={fields}
@@ -132,19 +140,17 @@ export default function PackageWorkspacePage({ params }: { params: Promise<{ pac
             reviewed={mergedReviewed}
             ocrWarnings={ocrWarnings}
             onGoToTab={setTab}
-            onRecordDecision={setPendingDecision}
           />
         </TabsContent>
         <TabsContent value="fields">
           <FieldsTab
             packageId={packageId}
-            primaryDocumentId={primaryDocument?.document_id ?? null}
             fields={fields}
             fieldIds={fieldIds}
             validationFailures={validationFailures}
-            onSelectEvidence={handleSelectEvidence}
             reviewed={mergedReviewed}
             onReviewed={handleReviewed}
+            onFocusEvidence={handleFocusEvidence}
           />
         </TabsContent>
         <TabsContent value="validation">
@@ -153,11 +159,12 @@ export default function PackageWorkspacePage({ params }: { params: Promise<{ pac
             fields={fields}
             validationFailures={validationFailures}
             reviewed={mergedReviewed}
-            onSelectField={handleSelectFieldFromValidation}
+            onSelectField={() => setTab("fields")}
+            onGoToTab={setTab}
           />
         </TabsContent>
         <TabsContent value="policy">
-          <PolicyTab packageId={packageId} />
+          <PolicyTab packageId={packageId} validationFailures={validationFailures} />
         </TabsContent>
         <TabsContent value="audit">
           <AuditTab packageId={packageId} />
@@ -167,11 +174,13 @@ export default function PackageWorkspacePage({ params }: { params: Promise<{ pac
   );
 
   return (
-    <div className="flex h-[calc(100vh-8rem)] flex-col gap-3">
+    <div className="flex flex-col gap-3">
       <PackageHeader
         packageId={packageId}
+        workflowName={domainPack.data?.display_name ?? pkg.data.domain ?? undefined}
         status={pkg.data.status}
         decision={pkg.data.decision ?? null}
+        reviewerOutcome={pkg.data.reviewer_outcome ?? null}
         confidence={pkg.data.overall_confidence ?? null}
         documentCount={pkg.data.document_count ?? documents?.length ?? 0}
         failureCount={validationFailures.length}
@@ -196,25 +205,37 @@ export default function PackageWorkspacePage({ params }: { params: Promise<{ pac
         </Sheet>
       </div>
 
-      <div className="hidden flex-1 overflow-hidden rounded-md border md:block">
-        <ResizablePanelGroup orientation="horizontal">
-          <ResizablePanel defaultSize="18" minSize="12" maxSize="30">
-            <div className="h-full overflow-auto border-r">{documentListPanel}</div>
+      <div className="hidden rounded-md border md:block">
+        {/* The resizable group defaults to a fixed, clipped height (100% of an
+            ancestor + overflow:hidden) so its columns can never grow past the
+            viewport. Overriding both here lets the PDF column grow to its full
+            page height instead of scrolling in its own small box — the page
+            itself scrolls to reveal it, while the doc list and review panel
+            stay pinned to the viewport via their own sticky wrappers below. */}
+        <ResizablePanelGroup orientation="horizontal" style={{ height: "auto", overflow: "visible" }}>
+          <ResizablePanel defaultSize="14" minSize="10" maxSize="28" style={{ maxHeight: "none", overflow: "visible" }}>
+            <div className="sticky top-4 max-h-[calc(100vh-8rem)] overflow-auto border-r">
+              {documentListPanel}
+            </div>
           </ResizablePanel>
           <ResizableHandle withHandle />
-          <ResizablePanel defaultSize="42" minSize="25">
-            <DocumentViewer packageId={packageId} documentId={activeDocumentId} evidence={evidence} />
+          <ResizablePanel
+            defaultSize="38"
+            minSize="25"
+            style={{ maxHeight: "none", overflowY: "visible", overflowX: "hidden" }}
+          >
+            <DocumentViewer packageId={packageId} documentId={activeDocumentId} focus={evidenceFocus} growToFit />
           </ResizablePanel>
           <ResizableHandle withHandle />
-          <ResizablePanel defaultSize="40" minSize="28">
-            {reviewPanel}
+          <ResizablePanel defaultSize="48" minSize="28" style={{ maxHeight: "none", overflow: "visible" }}>
+            <div className="sticky top-4 h-[calc(100vh-8rem)]">{reviewPanel}</div>
           </ResizablePanel>
         </ResizablePanelGroup>
       </div>
 
       <div className="flex flex-1 flex-col gap-3 overflow-auto md:hidden">
         <div className="h-80 rounded-md border">
-          <DocumentViewer packageId={packageId} documentId={activeDocumentId} evidence={evidence} />
+          <DocumentViewer packageId={packageId} documentId={activeDocumentId} focus={evidenceFocus} />
         </div>
         {reviewPanel}
       </div>
@@ -225,6 +246,7 @@ export default function PackageWorkspacePage({ params }: { params: Promise<{ pac
         onClose={() => setPendingDecision(null)}
         unresolvedFailureCount={validationFailures.length}
         status={pkg.data.status}
+        currentDecision={pkg.data.decision ?? null}
       />
     </div>
   );

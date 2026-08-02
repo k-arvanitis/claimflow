@@ -55,6 +55,122 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/llm-credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Llm Credentials
+         * @description The stored BYOK provider/model and whether a key is set, masked to its last
+         *     4 characters, plus the effective service/model. Never returns the full key.
+         */
+        get: operations["get_llm_credentials_llm_credentials_get"];
+        put?: never;
+        /**
+         * Set Llm Credentials
+         * @description Save the chosen provider/key/model. A blank api_key keeps the existing
+         *     stored key (see set_credentials's docstring). Takes effect immediately.
+         */
+        post: operations["set_llm_credentials_llm_credentials_post"];
+        /**
+         * Delete Llm Credentials
+         * @description Clear the stored override, reverting to the env-configured LLM.
+         */
+        delete: operations["delete_llm_credentials_llm_credentials_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/domain-packs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List available domain packs */
+        get: operations["list_domain_packs_domain_packs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/domain-packs/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Inspect a single domain pack's configuration */
+        get: operations["get_domain_pack_domain_packs__key__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/policies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Policies */
+        get: operations["list_policies_policies_get"];
+        put?: never;
+        /** Add or replace a policy document and rebuild the retrieval index */
+        post: operations["upload_policy_policies_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/policies/{filename}/file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download/view a policy document's original PDF */
+        get: operations["get_policy_file_policies__filename__file_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/policies/{filename}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Policy */
+        delete: operations["delete_policy_policies__filename__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/packages": {
         parameters: {
             query?: never;
@@ -67,6 +183,23 @@ export interface paths {
         put?: never;
         /** Upload documents and create a new claim package */
         post: operations["create_package_packages_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/packages/export.xlsx": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Export multiple packages (matching the same filters as GET /packages) as one workbook */
+        get: operations["export_packages_batch_excel_packages_export_xlsx_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -346,6 +479,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/packages/{package_id}/export.xlsx": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Export the full claim result as a multi-sheet Excel workbook */
+        get: operations["export_package_excel_packages__package_id__export_xlsx_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -370,6 +520,27 @@ export interface components {
         Body_create_package_packages_post: {
             /** Files */
             files: string[];
+            /** Domain */
+            domain?: string | null;
+        };
+        /** Body_upload_policy_policies_post */
+        Body_upload_policy_policies_post: {
+            /** File */
+            file: string;
+            /** Domain */
+            domain: string;
+            /**
+             * Authority
+             * @default synthetic
+             */
+            authority: string;
+        };
+        /** DailyPackageCount */
+        DailyPackageCount: {
+            /** Date */
+            date: string;
+            /** Count */
+            count: number;
         };
         /** DashboardSummaryResponse */
         DashboardSummaryResponse: {
@@ -391,6 +562,8 @@ export interface components {
             straight_through_rate: number;
             /** Top Validation Failures */
             top_validation_failures: components["schemas"]["ValidationFailureCount"][];
+            /** Packages By Day */
+            packages_by_day: components["schemas"]["DailyPackageCount"][];
         };
         /** DecisionRequest */
         DecisionRequest: {
@@ -457,6 +630,38 @@ export interface components {
          * @enum {string}
          */
         DocumentType: "cms1500" | "eob" | "medicare_summary_notice" | "xactimate" | "declarations_page" | "loan" | "sba_form_413" | "sba_form_2202" | "medical_bill" | "insurance_policy" | "denial_letter" | "clinical_note" | "lab_report" | "discharge_summary" | "referral_letter" | "prior_authorization_letter" | "eligibility_benefits_verification" | "ub04_cms1450" | "loss_report" | "contractor_invoice" | "adjuster_notes" | "roof_inspection_report" | "damage_photo" | "material_receipt" | "fire_report" | "police_report" | "tax_return" | "bank_statement" | "balance_sheet" | "income_statement" | "id_document" | "supporting_exhibit" | "profit_loss_statement" | "debt_schedule" | "business_license" | "articles_of_incorporation" | "payroll_report" | "w2_1099_paystub" | "unknown";
+        /** DomainPackDetail */
+        DomainPackDetail: {
+            /** Key */
+            key: string;
+            /** Display Name */
+            display_name: string;
+            /** Document Types */
+            document_types: string[];
+            /** Required Fields */
+            required_fields: string[];
+            /** Optional Fields */
+            optional_fields: string[];
+            /** Confidence Threshold */
+            confidence_threshold: number;
+            /** Escalation Threshold */
+            escalation_threshold: number;
+            /** Policy Collection */
+            policy_collection: string | null;
+            /** Retrieval Mode */
+            retrieval_mode: string;
+            /** Reviewer Guidance */
+            reviewer_guidance: string;
+        };
+        /** DomainPackSummary */
+        DomainPackSummary: {
+            /** Key */
+            key: string;
+            /** Display Name */
+            display_name: string;
+            /** Document Types */
+            document_types: string[];
+        };
         /** ErrorBody */
         ErrorBody: {
             /** Code */
@@ -565,6 +770,34 @@ export interface components {
             /** Corrected Value */
             corrected_value: unknown | null;
         };
+        /** LLMCredentialsRequest */
+        LLMCredentialsRequest: {
+            /** Provider */
+            provider: string;
+            /** Api Key */
+            api_key?: string | null;
+            /** Model */
+            model?: string | null;
+        };
+        /** LLMCredentialsResponse */
+        LLMCredentialsResponse: {
+            /** Provider */
+            provider: string | null;
+            /** Model */
+            model: string | null;
+            /** Key Set */
+            key_set: boolean;
+            /** Key Last4 */
+            key_last4: string | null;
+            /** Providers */
+            providers: string[];
+            /** Active Service */
+            active_service: string;
+            /** Active Model */
+            active_model: string;
+            /** Using Override */
+            using_override: boolean;
+        };
         /** PackageCreateResponse */
         PackageCreateResponse: {
             /** Package Id */
@@ -599,10 +832,21 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+            /** Client Name */
+            client_name?: string | null;
             /** Domain */
             domain?: string | null;
             /** Decision */
             decision?: string | null;
+            /** System Recommendation */
+            system_recommendation?: string | null;
+            /** Reviewer Outcome */
+            reviewer_outcome?: string | null;
+            /**
+             * Reviewer Override
+             * @default false
+             */
+            reviewer_override: boolean;
             /**
              * Review Reasons
              * @default []
@@ -657,10 +901,23 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+            /** Client Name */
+            client_name?: string | null;
+            /** Client Key */
+            client_key?: string | null;
             /** Domain */
             domain?: string | null;
             /** Decision */
             decision?: string | null;
+            /** System Recommendation */
+            system_recommendation?: string | null;
+            /** Reviewer Outcome */
+            reviewer_outcome?: string | null;
+            /**
+             * Reviewer Override
+             * @default false
+             */
+            reviewer_override: boolean;
             /** Overall Confidence */
             overall_confidence?: number | null;
             /** Document Count */
@@ -696,6 +953,33 @@ export interface components {
             answer: string;
             /** Citations */
             citations: unknown[];
+            /** Field */
+            field?: string | null;
+            /** Rule */
+            rule?: string | null;
+            /**
+             * Status
+             * @default found
+             */
+            status: string;
+        };
+        /** PolicyFile */
+        PolicyFile: {
+            /** Filename */
+            filename: string;
+            /** Domain */
+            domain: string;
+            /** Authority */
+            authority: string;
+            /** Size Bytes */
+            size_bytes: number;
+        };
+        /** PolicyIndexStatus */
+        PolicyIndexStatus: {
+            /** Status */
+            status: string;
+            /** Chunk Count */
+            chunk_count: number;
         };
         /**
          * ReviewActionType
@@ -733,6 +1017,14 @@ export interface components {
             rule: string;
             /** Reason */
             reason: string;
+            /** Severity */
+            severity: string;
+            /** Policy Required */
+            policy_required: boolean;
+            /** Machine Value */
+            machine_value?: string | null;
+            /** Expected Value */
+            expected_value?: string | null;
         };
         /** SettingsResponse */
         SettingsResponse: {
@@ -759,6 +1051,11 @@ export interface components {
             /** Anthropic Api Key Configured */
             anthropic_api_key_configured: boolean;
         };
+        /** StatusResponse */
+        StatusResponse: {
+            /** Status */
+            status: string;
+        };
         /** ValidationFailureCount */
         ValidationFailureCount: {
             /** Rule */
@@ -774,6 +1071,10 @@ export interface components {
             rule: string;
             /** Reason */
             reason: string;
+            /** Severity */
+            severity: string;
+            /** Policy Required */
+            policy_required: boolean;
         };
         /** ValidationRerunRequest */
         ValidationRerunRequest: {
@@ -917,6 +1218,362 @@ export interface operations {
             };
         };
     };
+    get_llm_credentials_llm_credentials_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LLMCredentialsResponse"];
+                };
+            };
+        };
+    };
+    set_llm_credentials_llm_credentials_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LLMCredentialsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    delete_llm_credentials_llm_credentials_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    list_domain_packs_domain_packs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DomainPackSummary"][];
+                };
+            };
+        };
+    };
+    get_domain_pack_domain_packs__key__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DomainPackDetail"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    list_policies_policies_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PolicyFile"][];
+                };
+            };
+        };
+    };
+    upload_policy_policies_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_policy_policies_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PolicyIndexStatus"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    get_policy_file_policies__filename__file_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                filename: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    delete_policy_policies__filename__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                filename: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PolicyIndexStatus"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     list_packages_packages_get: {
         parameters: {
             query?: {
@@ -931,6 +1588,7 @@ export interface operations {
                 date_from?: string | null;
                 date_to?: string | null;
                 search?: string | null;
+                client_key?: string | null;
                 sort?: string;
             };
             header?: never;
@@ -997,6 +1655,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PackageCreateResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    export_packages_batch_excel_packages_export_xlsx_get: {
+        parameters: {
+            query?: {
+                status?: string | null;
+                domain?: string | null;
+                decision?: string | null;
+                client_key?: string | null;
+                search?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Not Found */
@@ -1874,6 +2585,55 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ExportResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    export_package_excel_packages__package_id__export_xlsx_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                package_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Not Found */

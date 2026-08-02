@@ -23,6 +23,10 @@ export type ValidationFailure = {
   field: string;
   rule: string;
   reason: string;
+  severity: "error" | "warning";
+  policy_required: boolean;
+  machine_value?: string | null;
+  expected_value?: string | null;
 };
 
 export type PolicyAnswer = {
@@ -43,6 +47,8 @@ export type PackageResult = {
   decision: "ready_for_processing" | "needs_review" | "blocked_or_incomplete" | null;
   extraction_data: Record<string, unknown> | null;
   domain: string | null;
+  detected_domain: string | null;
+  domain_mismatch: boolean;
   documents: PackageDocumentResult[];
   ocr_log: unknown[];
   extraction_overall_confidence: number | null;

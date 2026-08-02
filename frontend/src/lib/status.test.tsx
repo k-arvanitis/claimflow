@@ -5,7 +5,7 @@ import { StatusBadge, DecisionBadge, ConfidenceBadge, ConfidenceLabel } from "@/
 describe("StatusBadge", () => {
   it("renders a human label for a known status", () => {
     render(<StatusBadge status="review_ready" />);
-    expect(screen.getByText("Ready for review")).toBeInTheDocument();
+    expect(screen.getByText("Awaiting decision")).toBeInTheDocument();
   });
 
   it("falls back to the raw value for an unknown status", () => {
@@ -23,6 +23,21 @@ describe("DecisionBadge", () => {
   it("shows the decision label when present", () => {
     render(<DecisionBadge decision="blocked_or_incomplete" />);
     expect(screen.getByText("Blocked or incomplete")).toBeInTheDocument();
+  });
+
+  it("shows 'Ready for approval' for an unresolved system recommendation", () => {
+    render(<DecisionBadge decision="ready_for_processing" />);
+    expect(screen.getByText("Ready for approval")).toBeInTheDocument();
+  });
+
+  it("shows 'Approved' instead of 'Ready for approval' once a reviewer has resolved it", () => {
+    render(<DecisionBadge decision="ready_for_processing" resolved />);
+    expect(screen.getByText("Approved")).toBeInTheDocument();
+  });
+
+  it("shows 'Blocked' instead of 'Blocked or incomplete' once a reviewer has resolved it", () => {
+    render(<DecisionBadge decision="blocked_or_incomplete" resolved />);
+    expect(screen.getByText("Blocked")).toBeInTheDocument();
   });
 });
 

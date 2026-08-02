@@ -42,12 +42,17 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { StatusBadge, DecisionBadge, ConfidenceBadge } from "@/lib/status";
-import { usePackageList, useReviewQueue, useDeletePackage, type PackageListParams } from "@/lib/queries";
-import { API_BASE_URL } from "@/lib/api";
+import { usePackageList, useDeletePackage, useDomainPack, useDomainPacks, type PackageListParams } from "@/lib/queries";
+import { API_BASE_URL, downloadPackageExport, downloadPackageExportExcel, downloadPackagesBatchExcel } from "@/lib/api";
 import { AlertTriangle, Inbox } from "lucide-react";
 import { toast } from "sonner";
 
 const DOMAINS = ["cms1500", "eob", "medicare_summary_notice", "xactimate", "declarations_page", "loan", "sba_form_413", "sba_form_2202"];
+
+function DomainCell({ domain }: { domain: string | null }) {
+  const { data } = useDomainPack(domain);
+  return <span>{data?.display_name ?? domain ?? "—"}</span>;
+}
 const STATUSES = ["queued", "processing", "review_ready", "completed", "processing_error", "validation_error", "retrieval_error"];
 const DECISIONS = ["ready_for_processing", "needs_review", "blocked_or_incomplete"];
 const SORTS = [
@@ -57,7 +62,7 @@ const SORTS = [
   { value: "-validation_failure_count", label: "Most failures first" },
 ];
 
-export function PackageQueue({ mode }: { mode: "packages" | "reviews" }) {
+export function PackageQueue() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
@@ -74,12 +79,12 @@ export function PackageQueue({ mode }: { mode: "packages" | "reviews" }) {
     date_from: searchParams.get("date_from") ?? undefined,
     date_to: searchParams.get("date_to") ?? undefined,
     search: searchParams.get("search") ?? undefined,
+    client_key: searchParams.get("client_key") ?? undefined,
     sort: searchParams.get("sort") ?? "-created_at",
   };
 
-  const packagesQuery = usePackageList(params, mode === "packages");
-  const reviewsQuery = useReviewQueue(params, mode === "reviews");
-  const query = mode === "packages" ? packagesQuery : reviewsQuery;
+  const query = usePackageList(params);
+  const domainPacks = useDomainPacks();
   const remove = useDeletePackage();
 
   function setParam(key: string, value: string | undefined) {
@@ -91,37 +96,66 @@ export function PackageQueue({ mode }: { mode: "packages" | "reviews" }) {
   }
 
   async function handleExport(packageId: string) {
-    window.open(`${API_BASE_URL}/packages/${packageId}/export`, "_blank");
+    try {
+      await downloadPackageExport(packageId);
+    } catch {
+      toast.error("Could not export package");
+    }
+  }
+
+  async function handleExportExcel(packageId: string) {
+    try {
+      await downloadPackageExportExcel(packageId);
+    } catch {
+      toast.error("Could not export package");
+    }
+  }
+
+  async function handleExportFiltered() {
+    try {
+      await downloadPackagesBatchExcel({
+        status: params.status,
+        domain: params.domain,
+        decision: params.decision,
+        search: params.search,
+        client_key: params.client_key,
+      });
+    } catch {
+      toast.error("Could not export packages");
+    }
   }
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
         <Input
-          placeholder="Search package ID…"
+          placeholder="Search package ID or client name…"
           defaultValue={params.search}
-          className="w-48"
+          className="w-56"
           onKeyDown={(e) => {
             if (e.key === "Enter") setParam("search", (e.target as HTMLInputElement).value || undefined);
           }}
         />
-        {mode === "packages" && (
-          <Select value={params.status ?? "all"} onValueChange={(v) => setParam("status", v === "all" ? undefined : v)}>
-            <SelectTrigger className="w-40">
-              <SelectValue placeholder="Status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                <SelectItem value="all">All statuses</SelectItem>
-                {STATUSES.map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {s.replace(/_/g, " ")}
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
+        {params.client_key && (
+          <Button variant="secondary" size="sm" onClick={() => setParam("client_key", undefined)}>
+            Client: {params.client_key} ×
+          </Button>
         )}
+        <Select value={params.status ?? "all"} onValueChange={(v) => setParam("status", v === "all" ? undefined : v)}>
+          <SelectTrigger className="w-40">
+            <SelectValue placeholder="Status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              <SelectItem value="all">All statuses</SelectItem>
+              {STATUSES.map((s) => (
+                <SelectItem key={s} value={s}>
+                  {s.replace(/_/g, " ")}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
         <Select value={params.domain ?? "all"} onValueChange={(v) => setParam("domain", v === "all" ? undefined : v)}>
           <SelectTrigger className="w-40">
             <SelectValue placeholder="Domain" />
@@ -129,9 +163,9 @@ export function PackageQueue({ mode }: { mode: "packages" | "reviews" }) {
           <SelectContent>
             <SelectGroup>
               <SelectItem value="all">All domains</SelectItem>
-              {DOMAINS.map((d) => (
-                <SelectItem key={d} value={d}>
-                  {d}
+              {(domainPacks.data ?? DOMAINS.map((key) => ({ key, display_name: key }))).map((d) => (
+                <SelectItem key={d.key} value={d.key}>
+                  {d.display_name}
                 </SelectItem>
               ))}
             </SelectGroup>
@@ -178,6 +212,10 @@ export function PackageQueue({ mode }: { mode: "packages" | "reviews" }) {
           <RefreshCw className={query.isFetching ? "animate-spin" : ""} data-icon="inline-start" />
           Refresh
         </Button>
+        <Button variant="outline" size="sm" onClick={handleExportFiltered} disabled={!query.data?.total}>
+          <Download data-icon="inline-start" />
+          Export filtered (Excel)
+        </Button>
       </div>
 
       {query.isError && (
@@ -200,12 +238,8 @@ export function PackageQueue({ mode }: { mode: "packages" | "reviews" }) {
             <EmptyMedia variant="icon">
               <Inbox />
             </EmptyMedia>
-            <EmptyTitle>{mode === "reviews" ? "Review queue is empty" : "No packages found"}</EmptyTitle>
-            <EmptyDescription>
-              {mode === "reviews"
-                ? "No packages currently need human review."
-                : "Try adjusting your filters, or upload a new package."}
-            </EmptyDescription>
+            <EmptyTitle>No packages found</EmptyTitle>
+            <EmptyDescription>Try adjusting your filters, or upload a new package.</EmptyDescription>
           </EmptyHeader>
         </Empty>
       ) : query.data ? (
@@ -214,10 +248,11 @@ export function PackageQueue({ mode }: { mode: "packages" | "reviews" }) {
             <TableHeader>
               <TableRow>
                 <TableHead>Package</TableHead>
+                <TableHead>Client</TableHead>
                 <TableHead>Domain</TableHead>
                 <TableHead>Documents</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead>Decision</TableHead>
+                <TableHead>Outcome</TableHead>
                 <TableHead>Confidence</TableHead>
                 <TableHead>Failures</TableHead>
                 <TableHead>Created</TableHead>
@@ -232,13 +267,43 @@ export function PackageQueue({ mode }: { mode: "packages" | "reviews" }) {
                   onClick={() => router.push(`/packages/${pkg.package_id}`)}
                 >
                   <TableCell className="font-mono text-xs">{pkg.package_id.slice(0, 8)}</TableCell>
-                  <TableCell className="text-sm">{pkg.domain ?? "—"}</TableCell>
+                  <TableCell className="text-sm">
+                    {pkg.client_name && pkg.client_key ? (
+                      <button
+                        className="hover:underline"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setParam("client_key", pkg.client_key ?? undefined);
+                        }}
+                      >
+                        {pkg.client_name}
+                      </button>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-sm"><DomainCell domain={pkg.domain ?? null} /></TableCell>
                   <TableCell className="text-sm tabular-nums">{pkg.document_count}</TableCell>
                   <TableCell>
                     <StatusBadge status={pkg.status} />
                   </TableCell>
                   <TableCell>
-                    <DecisionBadge decision={pkg.decision} />
+                    {pkg.reviewer_outcome === "ready_for_processing" ||
+                    pkg.reviewer_outcome === "blocked_or_incomplete" ? (
+                      <div className="flex items-center gap-1.5">
+                        <DecisionBadge decision={pkg.reviewer_outcome} resolved />
+                        {pkg.reviewer_override && (
+                          <span className="text-xs text-muted-foreground">(overrode system)</span>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1.5">
+                        <DecisionBadge decision={pkg.system_recommendation ?? null} />
+                        {pkg.system_recommendation && (
+                          <span className="text-xs text-muted-foreground">(pending review)</span>
+                        )}
+                      </div>
+                    )}
                   </TableCell>
                   <TableCell>
                     <ConfidenceBadge confidence={pkg.overall_confidence} />
@@ -276,7 +341,11 @@ export function PackageQueue({ mode }: { mode: "packages" | "reviews" }) {
                           </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => handleExport(pkg.package_id)}>
                             <Download data-icon="inline-start" />
-                            Export
+                            Export JSON
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleExportExcel(pkg.package_id)}>
+                            <Download data-icon="inline-start" />
+                            Export Excel
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             variant="destructive"
@@ -296,35 +365,41 @@ export function PackageQueue({ mode }: { mode: "packages" | "reviews" }) {
         </div>
       ) : null}
 
-      {query.data && query.data.total > query.data.page_size && (
-        <Pagination>
-          <PaginationContent>
-            <PaginationItem>
-              <PaginationPrevious
-                href="#"
-                onClick={(e) => {
-                  e.preventDefault();
-                  if (params.page && params.page > 1) setParam("page", String(params.page - 1));
-                }}
-              />
-            </PaginationItem>
-            <PaginationItem className="px-3 text-sm text-muted-foreground">
-              Page {query.data.page} of {Math.ceil(query.data.total / query.data.page_size)}
-            </PaginationItem>
-            <PaginationItem>
-              <PaginationNext
-                href="#"
-                onClick={(e) => {
-                  e.preventDefault();
-                  if (query.data && query.data.page * query.data.page_size < query.data.total) {
-                    setParam("page", String(query.data.page + 1));
-                  }
-                }}
-              />
-            </PaginationItem>
-          </PaginationContent>
-        </Pagination>
-      )}
+      {query.data && query.data.total > query.data.page_size && (() => {
+        const isFirstPage = query.data.page <= 1;
+        const isLastPage = query.data.page * query.data.page_size >= query.data.total;
+        return (
+          <Pagination>
+            <PaginationContent>
+              <PaginationItem>
+                <PaginationPrevious
+                  href="#"
+                  aria-disabled={isFirstPage}
+                  className={isFirstPage ? "pointer-events-none opacity-50" : undefined}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    if (!isFirstPage) setParam("page", String(query.data.page - 1));
+                  }}
+                />
+              </PaginationItem>
+              <PaginationItem className="px-3 text-sm text-muted-foreground">
+                Page {query.data.page} of {Math.ceil(query.data.total / query.data.page_size)}
+              </PaginationItem>
+              <PaginationItem>
+                <PaginationNext
+                  href="#"
+                  aria-disabled={isLastPage}
+                  className={isLastPage ? "pointer-events-none opacity-50" : undefined}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    if (!isLastPage) setParam("page", String(query.data.page + 1));
+                  }}
+                />
+              </PaginationItem>
+            </PaginationContent>
+          </Pagination>
+        );
+      })()}
 
       <AlertDialog open={pendingDelete !== null} onOpenChange={(open) => !open && setPendingDelete(null)}>
         <AlertDialogContent>

@@ -18,7 +18,7 @@ export default function PackagesPage() {
         </Button>
       </div>
       <Suspense fallback={<Skeleton className="h-64" />}>
-        <PackageQueue mode="packages" />
+        <PackageQueue />
       </Suspense>
     </div>
   );

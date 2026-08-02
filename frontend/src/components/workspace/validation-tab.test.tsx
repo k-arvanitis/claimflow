@@ -33,13 +33,15 @@ const fields: ExtractionField[] = [
   },
 ];
 
-const failures: ValidationFailure[] = [{ field: "claim_number", rule: "mandatory", reason: "claim_number is required" }];
+const failures: ValidationFailure[] = [
+  { field: "claim_number", rule: "mandatory", reason: "claim_number is required", severity: "error", policy_required: false },
+];
 
 describe("ValidationTab", () => {
   it("shows an empty state when there are no failures", () => {
     render(
       withQueryClient(
-        <ValidationTab packageId="pkg1" fields={fields} validationFailures={[]} reviewed={{}} onSelectField={vi.fn()} />
+        <ValidationTab packageId="pkg1" fields={fields} validationFailures={[]} reviewed={{}} onSelectField={vi.fn()} onGoToTab={vi.fn()} />
       )
     );
     expect(screen.getByText(/no validation failures/i)).toBeInTheDocument();
@@ -54,6 +56,7 @@ describe("ValidationTab", () => {
           validationFailures={failures}
           reviewed={{ claim_number: { action: "edit", value: "CLM-9001" } }}
           onSelectField={vi.fn()}
+          onGoToTab={vi.fn()}
         />
       )
     );
@@ -80,6 +83,7 @@ describe("ValidationTab", () => {
           validationFailures={failures}
           reviewed={{ "service_lines[0]": { action: "reject", value: undefined } }}
           onSelectField={vi.fn()}
+          onGoToTab={vi.fn()}
         />
       )
     );

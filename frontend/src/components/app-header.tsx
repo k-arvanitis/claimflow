@@ -19,7 +19,7 @@ const LABELS: Record<string, string> = {
   dashboard: "Dashboard",
   packages: "Packages",
   new: "New package",
-  reviews: "Review queue",
+  policies: "Policies",
   settings: "Settings",
 };
 

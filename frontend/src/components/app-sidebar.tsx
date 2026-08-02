@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, ListChecks, FolderOpen, FilePlus2, Settings, FileStack } from "lucide-react";
+import { LayoutDashboard, FolderOpen, FilePlus2, BookText, Settings, FileStack } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -19,9 +19,9 @@ import { useDashboardSummary } from "@/lib/queries";
 
 const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/reviews", label: "Review queue", icon: ListChecks, badgeKey: "awaiting_review" as const },
-  { href: "/packages", label: "Packages", icon: FolderOpen },
+  { href: "/packages", label: "Packages", icon: FolderOpen, badgeKey: "awaiting_review" as const },
   { href: "/packages/new", label: "New package", icon: FilePlus2 },
+  { href: "/policies", label: "Policies", icon: BookText },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
@@ -42,7 +42,9 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu>
               {NAV.map((item) => {
-                const active = pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(item.href) && item.href !== "/packages/new");
+                const active =
+                  pathname === item.href ||
+                  (item.href !== "/dashboard" && pathname.startsWith(item.href) && pathname !== "/packages/new");
                 const badge = item.badgeKey ? summary?.[item.badgeKey] : undefined;
                 return (
                   <SidebarMenuItem key={item.href}>

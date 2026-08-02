@@ -17,7 +17,7 @@ export function MetricCard({
     tone === "success"
       ? "text-success"
       : tone === "warning"
-        ? "text-warning-foreground"
+        ? "text-warning"
         : tone === "danger"
           ? "text-destructive"
           : "text-foreground";

@@ -4,11 +4,11 @@ import { useState } from "react";
 import { RefreshCw, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { CircleCheck } from "lucide-react";
 import type { ExtractionField, ValidationFailure } from "@/lib/package-result";
 import type { ReviewState } from "@/components/workspace/fields-tab";
+import { ruleLabel } from "@/lib/status";
 import { useRerunValidation } from "@/lib/queries";
 import { toast } from "sonner";
 
@@ -18,12 +18,14 @@ export function ValidationTab({
   validationFailures,
   reviewed,
   onSelectField,
+  onGoToTab,
 }: {
   packageId: string;
   fields: ExtractionField[];
   validationFailures: ValidationFailure[];
   reviewed: ReviewState;
   onSelectField: (fieldName: string) => void;
+  onGoToTab: (tab: string) => void;
 }) {
   const rerun = useRerunValidation(packageId);
   const [lastResult, setLastResult] = useState<{ decision: string; decisionChanged: boolean } | null>(null);
@@ -76,47 +78,56 @@ export function ValidationTab({
           </EmptyHeader>
         </Empty>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Field</TableHead>
-              <TableHead>Rule</TableHead>
-              <TableHead>Reason</TableHead>
-              <TableHead>Machine value</TableHead>
-              <TableHead>Corrected value</TableHead>
-              <TableHead className="w-10" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {validationFailures.map((f, i) => {
-              const correction = reviewed[f.field];
-              return (
-                <TableRow key={`${f.field}-${i}`}>
-                  <TableCell className="font-medium">{f.field}</TableCell>
-                  <TableCell>
-                    <Badge variant="outline">{f.rule}</Badge>
-                  </TableCell>
-                  <TableCell className="text-sm">{f.reason}</TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {String(machineValue.get(f.field) ?? "—")}
-                  </TableCell>
-                  <TableCell className="text-sm">
-                    {correction?.action === "edit" ? (
-                      <span className="text-success">{String(correction.value)}</span>
-                    ) : (
-                      "—"
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <Button size="icon" variant="ghost" aria-label="Open field" onClick={() => onSelectField(f.field)}>
+        <div className="flex flex-col gap-2">
+          {validationFailures.map((f, i) => {
+            const correction = reviewed[f.field];
+            const rawValue = machineValue.get(f.field);
+            // Prefer the backend's authoritative comparison value (set by the rule that
+            // evaluated it) over the raw extracted field — for rules like "arithmetic"
+            // the two differ: the field holds the reported total, machine_value holds
+            // what the rule actually computed and compared against it.
+            const machine =
+              f.machine_value ??
+              (rawValue == null ? "—" : typeof rawValue === "object" ? JSON.stringify(rawValue) : String(rawValue));
+            return (
+              <div key={`${f.field}-${i}`} className="rounded-md border p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="font-medium">{f.field}</span>
+                    <Badge variant={f.severity === "error" ? "destructive" : "secondary"}>
+                      {f.severity === "error" ? "Blocking" : "Warning"}
+                    </Badge>
+                    <Badge variant="outline" title={f.rule}>{ruleLabel(f.rule)}</Badge>
+                    <span className="text-xs text-muted-foreground">
+                      {f.policy_required ? "policy dependent" : "deterministic"}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Button size="icon" variant="ghost" aria-label="Open field" title="Open field" onClick={() => onSelectField(f.field)}>
                       <ExternalLink />
                     </Button>
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
+                    {f.policy_required && (
+                      <Button size="sm" variant="ghost" onClick={() => onGoToTab("policy")}>
+                        Policy evidence
+                      </Button>
+                    )}
+                  </div>
+                </div>
+                <p className="mt-1.5 text-sm">{f.reason}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Machine value: {machine}
+                  {f.expected_value && <> · Expected: {f.expected_value}</>}
+                  {correction?.action === "edit" && (
+                    <>
+                      {" "}
+                      → <span className="text-success">{String(correction.value)}</span>
+                    </>
+                  )}
+                </p>
+              </div>
+            );
+          })}
+        </div>
       )}
     </div>
   );

@@ -7,14 +7,18 @@ type Schemas = components["schemas"];
 export const qk = {
   dashboard: ["dashboard"] as const,
   packages: (params: Record<string, unknown>) => ["packages", params] as const,
-  reviewQueue: (params: Record<string, unknown>) => ["reviews", params] as const,
   package: (id: string) => ["package", id] as const,
   packageStatus: (id: string) => ["package-status", id] as const,
   documents: (id: string) => ["documents", id] as const,
   review: (id: string) => ["review", id] as const,
   policyEvidence: (id: string) => ["policy-evidence", id] as const,
   audit: (id: string) => ["audit", id] as const,
+  fieldEvidence: (packageId: string, fieldId: number) => ["field-evidence", packageId, fieldId] as const,
   export: (id: string) => ["export", id] as const,
+  domainPacks: ["domain-packs"] as const,
+  domainPack: (key: string) => ["domain-pack", key] as const,
+  llmCredentials: ["llm-credentials"] as const,
+  policies: ["policies"] as const,
 };
 
 export type PackageListParams = {
@@ -29,6 +33,7 @@ export type PackageListParams = {
   date_from?: string;
   date_to?: string;
   search?: string;
+  client_key?: string;
   sort?: string;
 };
 
@@ -49,18 +54,6 @@ export function usePackageList(params: PackageListParams, enabled = true) {
     queryKey: qk.packages(params),
     queryFn: async () => {
       const { data, error } = await api.GET("/packages", { params: { query: params } });
-      if (error) throw error;
-      return data;
-    },
-    enabled,
-  });
-}
-
-export function useReviewQueue(params: PackageListParams, enabled = true) {
-  return useQuery({
-    queryKey: qk.reviewQueue(params),
-    queryFn: async () => {
-      const { data, error } = await api.GET("/reviews/queue", { params: { query: params } });
       if (error) throw error;
       return data;
     },
@@ -112,6 +105,20 @@ export function usePackageReview(packageId: string) {
   });
 }
 
+export function useFieldEvidence(packageId: string, fieldId: number | null) {
+  return useQuery({
+    queryKey: qk.fieldEvidence(packageId, fieldId ?? -1),
+    queryFn: async () => {
+      const { data, error } = await api.GET("/packages/{package_id}/fields/{field_id}/evidence", {
+        params: { path: { package_id: packageId, field_id: fieldId as number } },
+      });
+      if (error) throw error;
+      return data as Schemas["FieldEvidenceResponse"];
+    },
+    enabled: fieldId != null,
+  });
+}
+
 export function usePolicyEvidence(packageId: string) {
   return useQuery({
     queryKey: qk.policyEvidence(packageId),
@@ -138,6 +145,33 @@ export function useAuditTrail(packageId: string) {
   });
 }
 
+export function useDomainPacks() {
+  return useQuery({
+    queryKey: qk.domainPacks,
+    queryFn: async () => {
+      const { data, error } = await api.GET("/domain-packs");
+      if (error) throw error;
+      return data;
+    },
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useDomainPack(key: string | null) {
+  return useQuery({
+    queryKey: qk.domainPack(key ?? ""),
+    queryFn: async () => {
+      const { data, error } = await api.GET("/domain-packs/{key}", {
+        params: { path: { key: key! } },
+      });
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!key,
+    staleTime: 5 * 60_000,
+  });
+}
+
 export function useExport(packageId: string, enabled: boolean) {
   return useQuery({
     queryKey: qk.export(packageId),
@@ -152,7 +186,8 @@ export function useExport(packageId: string, enabled: boolean) {
   });
 }
 
-function invalidatePackage(queryClient: ReturnType<typeof useQueryClient>, packageId: string) {
+export function invalidatePackage(queryClient: ReturnType<typeof useQueryClient>, packageId: string) {
+  queryClient.invalidateQueries({ queryKey: ["packages"] });
   queryClient.invalidateQueries({ queryKey: qk.package(packageId) });
   queryClient.invalidateQueries({ queryKey: qk.review(packageId) });
   queryClient.invalidateQueries({ queryKey: qk.audit(packageId) });
@@ -187,25 +222,6 @@ export function useReprocessPackage(packageId: string) {
       return data;
     },
     onSuccess: () => invalidatePackage(queryClient, packageId),
-  });
-}
-
-export function useReclassifyDocument(packageId: string) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (input: {
-      documentId: string;
-      docType: Schemas["DocumentType"];
-      reviewer?: string;
-    }) => {
-      const { data, error } = await api.POST("/packages/{package_id}/documents/{document_id}/reclassify", {
-        params: { path: { package_id: packageId, document_id: input.documentId } },
-        body: { doc_type: input.docType, reviewer: input.reviewer ?? "reviewer" },
-      });
-      if (error) throw error;
-      return data;
-    },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.documents(packageId) }),
   });
 }
 
@@ -279,5 +295,82 @@ export function useDeletePackage() {
       return data;
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["packages"] }),
+  });
+}
+
+export function useLLMCredentials() {
+  return useQuery({
+    queryKey: qk.llmCredentials,
+    queryFn: async () => {
+      const { data, error } = await api.GET("/llm-credentials");
+      if (error) throw error;
+      return data;
+    },
+  });
+}
+
+export function useSetLLMCredentials() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { provider: string; api_key: string | null; model: string | null }) => {
+      const { data, error } = await api.POST("/llm-credentials", { body: input });
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.llmCredentials }),
+  });
+}
+
+export function useDeleteLLMCredentials() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const { data, error } = await api.DELETE("/llm-credentials");
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.llmCredentials }),
+  });
+}
+
+export function usePolicies() {
+  return useQuery({
+    queryKey: qk.policies,
+    queryFn: async () => {
+      const { data, error } = await api.GET("/policies");
+      if (error) throw error;
+      return data;
+    },
+  });
+}
+
+export function useUploadPolicy() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { file: File; domain: string; authority: string }) => {
+      const form = new FormData();
+      form.append("file", input.file);
+      form.append("domain", input.domain);
+      form.append("authority", input.authority);
+      const res = await fetch(`${API_BASE_URL}/policies`, { method: "POST", body: form });
+      const body = await res.json();
+      if (!res.ok) throw body;
+      return body as Schemas["PolicyIndexStatus"];
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.policies }),
+  });
+}
+
+export function useDeletePolicy() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (filename: string) => {
+      const { data, error } = await api.DELETE("/policies/{filename}", {
+        params: { path: { filename } },
+      });
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.policies }),
   });
 }

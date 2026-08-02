@@ -16,10 +16,10 @@ vi.mock("@/lib/api", () => ({
 }));
 
 describe("PackageQueue", () => {
-  it("shows an empty state for the review queue when nothing needs review", async () => {
+  it("shows an empty state when no packages match the filters", async () => {
     getMock.mockResolvedValueOnce({ data: { items: [], page: 1, page_size: 25, total: 0 }, error: null });
-    render(withQueryClient(<PackageQueue mode="reviews" />));
-    expect(await screen.findByText(/review queue is empty/i)).toBeInTheDocument();
+    render(withQueryClient(<PackageQueue />));
+    expect(await screen.findByText(/no packages found/i)).toBeInTheDocument();
   });
 
   it("renders package rows with status, decision and confidence", async () => {
@@ -33,6 +33,9 @@ describe("PackageQueue", () => {
             updated_at: "2026-07-13T12:05:00Z",
             domain: "cms1500",
             decision: "needs_review",
+            system_recommendation: "needs_review",
+            reviewer_outcome: null,
+            reviewer_override: false,
             overall_confidence: 0.6,
             document_count: 1,
             validation_failure_count: 1,
@@ -44,15 +47,15 @@ describe("PackageQueue", () => {
       },
       error: null,
     });
-    render(withQueryClient(<PackageQueue mode="packages" />));
+    render(withQueryClient(<PackageQueue />));
     expect(await screen.findByText("cms1500")).toBeInTheDocument();
-    expect(screen.getByText("Ready for review")).toBeInTheDocument();
-    expect(screen.getByText("Needs manual review")).toBeInTheDocument();
+    expect(screen.getByText("Awaiting decision")).toBeInTheDocument();
+    expect(screen.getByText("Manual review required")).toBeInTheDocument();
   });
 
   it("shows a backend error state", async () => {
     getMock.mockRejectedValueOnce(new Error("network down"));
-    render(withQueryClient(<PackageQueue mode="packages" />));
+    render(withQueryClient(<PackageQueue />));
     expect(await screen.findByText(/could not load packages/i)).toBeInTheDocument();
   });
 });

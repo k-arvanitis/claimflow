@@ -20,9 +20,9 @@ import { toast } from "sonner";
 type PendingDecision = "ready_for_processing" | "needs_review" | "blocked_or_incomplete" | null;
 
 const DECISION_LABEL: Record<Exclude<PendingDecision, null>, string> = {
-  ready_for_processing: "Ready for processing",
-  needs_review: "Needs manual review",
-  blocked_or_incomplete: "Blocked or incomplete",
+  ready_for_processing: "Approved",
+  needs_review: "Manual review required",
+  blocked_or_incomplete: "Blocked",
 };
 
 export function DecisionDialog({
@@ -31,17 +31,23 @@ export function DecisionDialog({
   onClose,
   unresolvedFailureCount,
   status,
+  currentDecision,
 }: {
   packageId: string;
   pending: PendingDecision;
   onClose: () => void;
   unresolvedFailureCount: number;
   status: string;
+  currentDecision: string | null;
 }) {
   const [reason, setReason] = useState("");
   const record = useRecordDecision(packageId);
 
+  // Blocking a package always needs a reason; overriding the system's recommendation
+  // only needs a warning, not a forced explanation.
+  const isOverride = pending !== null && currentDecision !== null && pending !== currentDecision;
   const requiresReason = pending === "blocked_or_incomplete";
+  const showOverrideWarning = pending === "ready_for_processing" && isOverride;
   const showFailureWarning = pending === "ready_for_processing" && unresolvedFailureCount > 0;
   const showIncompleteWarning =
     pending === "ready_for_processing" && status !== "review_ready" && status !== "completed";
@@ -51,16 +57,22 @@ export function DecisionDialog({
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>
-            {pending === "ready_for_processing" && "Mark this package ready for processing?"}
+            {pending === "ready_for_processing" && "Approve this package?"}
             {pending === "needs_review" && "Send this package for manual review?"}
-            {pending === "blocked_or_incomplete" && "Mark this package blocked or incomplete?"}
+            {pending === "blocked_or_incomplete" && "Block this package?"}
           </AlertDialogTitle>
           <AlertDialogDescription>
-            This records a routing decision. The backend remains the final authority — recording a decision does
-            not change extracted data or validation results.
+            This records your decision. It doesn&apos;t change any extracted data or validation results.
           </AlertDialogDescription>
         </AlertDialogHeader>
 
+        {showOverrideWarning && (
+          <Alert variant="destructive">
+            <AlertTriangle />
+            <AlertTitle>Overriding system recommendation</AlertTitle>
+            <AlertDescription>The system recommended &quot;Manual review required&quot; for this package.</AlertDescription>
+          </Alert>
+        )}
         {showFailureWarning && (
           <Alert variant="destructive">
             <AlertTriangle />

@@ -10,8 +10,26 @@ const postMock = vi.fn().mockResolvedValue({
   error: null,
 });
 
+const getMock = vi.fn().mockResolvedValue({
+  data: {
+    field_id: 162,
+    name: "total_replacement_cost",
+    value: 15932.0,
+    confidence: 1.0,
+    document_id: "doc-1",
+    filename: "estimate.pdf",
+    page: 2,
+    quote: "RCV $15932.00",
+    bbox: [1, 2, 3, 4],
+    coordinate_system: "pdf_points",
+    block_type: "paragraph",
+    evidence_unavailable: false,
+  },
+  error: null,
+});
+
 vi.mock("@/lib/api", () => ({
-  api: { POST: (...args: unknown[]) => postMock(...args) },
+  api: { POST: (...args: unknown[]) => postMock(...args), GET: (...args: unknown[]) => getMock(...args) },
   API_BASE_URL: "http://localhost:8010",
 }));
 
@@ -35,18 +53,17 @@ describe("FieldsTab", () => {
       withQueryClient(
         <FieldsTab
           packageId="pkg1"
-          primaryDocumentId="doc1"
           fields={fields}
           fieldIds={{ total_replacement_cost: 162 }}
           validationFailures={[]}
-          onSelectEvidence={vi.fn()}
           reviewed={{}}
           onReviewed={onReviewed}
+          onFocusEvidence={vi.fn()}
         />
       )
     );
 
-    await userEvent.click(screen.getByRole("button", { name: /approve/i }));
+    await userEvent.click(screen.getByRole("button", { name: /confirm value/i }));
 
     expect(postMock).toHaveBeenCalledWith(
       "/packages/{package_id}/fields/{field_id}/review",
@@ -58,49 +75,22 @@ describe("FieldsTab", () => {
     expect(onReviewed).toHaveBeenCalledWith("total_replacement_cost", "approve", undefined);
   });
 
-  it("opens evidence when the evidence button is clicked", async () => {
-    const onSelectEvidence = vi.fn();
-    render(
-      withQueryClient(
-        <FieldsTab
-          packageId="pkg1"
-          primaryDocumentId="doc1"
-          fields={fields}
-          fieldIds={{ total_replacement_cost: 162 }}
-          validationFailures={[]}
-          onSelectEvidence={onSelectEvidence}
-          reviewed={{}}
-          onReviewed={vi.fn()}
-        />
-      )
-    );
-
-    await userEvent.click(screen.getByRole("button", { name: /view evidence/i }));
-    expect(onSelectEvidence).toHaveBeenCalledWith({
-      documentId: "doc1",
-      page: 1,
-      bbox: [1, 2, 3, 4],
-      quote: "RCV $15932.00",
-    });
-  });
-
   it("preserves numeric types when editing a scalar field", async () => {
     render(
       withQueryClient(
         <FieldsTab
           packageId="pkg1"
-          primaryDocumentId="doc1"
           fields={fields}
           fieldIds={{ total_replacement_cost: 162 }}
           validationFailures={[]}
-          onSelectEvidence={vi.fn()}
           reviewed={{}}
           onReviewed={vi.fn()}
+          onFocusEvidence={vi.fn()}
         />
       )
     );
 
-    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await userEvent.click(screen.getByRole("button", { name: "Correct value" }));
     const input = screen.getByRole("spinbutton", { name: /corrected value/i });
     await userEvent.clear(input);
     await userEvent.type(input, "42.5");
@@ -139,20 +129,21 @@ describe("FieldsTab", () => {
       withQueryClient(
         <FieldsTab
           packageId="pkg1"
-          primaryDocumentId="doc1"
           fields={nestedFields}
           fieldIds={{ "service_lines[0]": 200 }}
           validationFailures={[]}
-          onSelectEvidence={vi.fn()}
           reviewed={{}}
           onReviewed={vi.fn()}
+          onFocusEvidence={vi.fn()}
         />
       )
     );
 
-    await userEvent.click(screen.getByRole("button", { name: "Edit row" }));
-    const input = screen.getByRole("textbox", { name: /corrected value for service_lines\[0\]/i });
-    fireEvent.change(input, { target: { value: JSON.stringify({ cpt_code: "99214", units: 2 }) } });
+    await userEvent.click(screen.getByRole("button", { name: "Correct row" }));
+    const cptInput = screen.getByRole("textbox", { name: "CPT code" });
+    fireEvent.change(cptInput, { target: { value: "99214" } });
+    const unitsInput = screen.getByRole("textbox", { name: "Units" });
+    fireEvent.change(unitsInput, { target: { value: "2" } });
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
     expect(postMock).toHaveBeenLastCalledWith(
@@ -164,5 +155,36 @@ describe("FieldsTab", () => {
         }),
       })
     );
+  });
+
+  it("fetches evidence and jumps the document viewer directly on click", async () => {
+    const onFocusEvidence = vi.fn();
+    render(
+      withQueryClient(
+        <FieldsTab
+          packageId="pkg1"
+          fields={fields}
+          fieldIds={{ total_replacement_cost: 162 }}
+          validationFailures={[]}
+          reviewed={{}}
+          onReviewed={vi.fn()}
+          onFocusEvidence={onFocusEvidence}
+        />
+      )
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "View source evidence" }));
+
+    expect(getMock).toHaveBeenCalledWith(
+      "/packages/{package_id}/fields/{field_id}/evidence",
+      expect.objectContaining({ params: { path: { package_id: "pkg1", field_id: 162 } } })
+    );
+    // Jumps straight to the highlighted page — no intermediate panel to click through.
+    await vi.waitFor(() =>
+      expect(onFocusEvidence).toHaveBeenCalledWith(
+        expect.objectContaining({ documentId: "doc-1", page: 2, bbox: [1, 2, 3, 4] })
+      )
+    );
+    expect(screen.queryByText(/RCV \$15932\.00/)).not.toBeInTheDocument();
   });
 });

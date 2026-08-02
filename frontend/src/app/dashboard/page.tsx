@@ -9,7 +9,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { MetricCard } from "@/components/metric-card";
-import { StatusBadge, DecisionBadge, ConfidenceBadge } from "@/lib/status";
+import { DailyVolumeChart } from "@/components/daily-volume-chart";
+import { DecisionBadge, ruleLabel } from "@/lib/status";
 import { useDashboardSummary, usePackageList } from "@/lib/queries";
 
 export default function DashboardPage() {
@@ -42,60 +43,49 @@ export default function DashboardPage() {
       )}
 
       {summary.isLoading ? (
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-7">
-          {Array.from({ length: 7 }).map((_, i) => (
+        <div className="grid grid-cols-3 gap-3">
+          {Array.from({ length: 3 }).map((_, i) => (
             <Skeleton key={i} className="h-20" />
           ))}
         </div>
       ) : summary.data ? (
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-7">
-          <MetricCard label="Total packages" value={summary.data.total_packages} href="/packages" />
-          <MetricCard label="Processing" value={summary.data.processing} href="/packages?status=processing" />
-          <MetricCard
-            label="Awaiting review"
-            value={summary.data.awaiting_review}
-            href="/reviews"
-            tone="warning"
-          />
-          <MetricCard
-            label="Ready for processing"
-            value={summary.data.approved}
-            href="/packages?decision=ready_for_processing"
-            tone="success"
-          />
-          <MetricCard
-            label="Needs review"
-            value={summary.data.flagged}
-            href="/reviews?decision=needs_review"
-            tone="warning"
-          />
-          <MetricCard
-            label="Blocked or incomplete"
-            value={summary.data.escalated}
-            href="/reviews?decision=blocked_or_incomplete"
-            tone="danger"
-          />
-          <MetricCard
-            label="Processing errors"
-            value={summary.data.processing_errors}
-            href="/packages?status=processing_error"
-            tone="danger"
-          />
-        </div>
+        (() => {
+          const total = summary.data.total_packages;
+          const needsReview = summary.data.flagged + summary.data.escalated + summary.data.processing_errors;
+          const ready = summary.data.approved;
+          const pct = (n: number) => (total > 0 ? `${Math.round((n / total) * 100)}%` : "—");
+          return (
+            <div className="grid grid-cols-3 gap-3">
+              <MetricCard label="Uploaded" value={total} href="/packages" />
+              <MetricCard
+                label="Needs review"
+                value={`${needsReview} (${pct(needsReview)})`}
+                href="/packages?status=review_ready"
+                tone="warning"
+              />
+              <MetricCard
+                label="Approved"
+                value={`${ready} (${pct(ready)})`}
+                href="/packages?decision=ready_for_processing"
+                tone="success"
+              />
+            </div>
+          );
+        })()
       ) : null}
 
-      {summary.data && (
-        <Card className="w-fit">
-          <CardHeader>
-            <CardTitle className="text-sm font-medium text-muted-foreground">Straight-through rate</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <span className="text-2xl font-semibold tabular-nums">
-              {Math.round(summary.data.straight_through_rate * 100)}%
-            </span>
-          </CardContent>
-        </Card>
-      )}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">Packages uploaded, last 30 days</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {summary.isLoading ? (
+            <Skeleton className="h-32" />
+          ) : summary.data ? (
+            <DailyVolumeChart data={summary.data.packages_by_day} />
+          ) : null}
+        </CardContent>
+      </Card>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
@@ -126,10 +116,11 @@ export default function DashboardPage() {
                     <TableRow key={f.rule}>
                       <TableCell>
                         <Link
-                          href={`/reviews?validation_rule=${encodeURIComponent(f.rule)}`}
+                          href={`/packages?validation_rule=${encodeURIComponent(f.rule)}`}
                           className="hover:underline"
+                          title={f.rule}
                         >
-                          {f.rule}
+                          {ruleLabel(f.rule)}
                         </Link>
                       </TableCell>
                       <TableCell className="text-right tabular-nums">{f.count}</TableCell>
@@ -168,8 +159,6 @@ export default function DashboardPage() {
                   <TableRow>
                     <TableHead>Package</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead>Decision</TableHead>
-                    <TableHead className="text-right">Confidence</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -179,13 +168,16 @@ export default function DashboardPage() {
                     }}>
                       <TableCell className="font-mono text-xs">{pkg.package_id.slice(0, 8)}</TableCell>
                       <TableCell>
-                        <StatusBadge status={pkg.status} />
-                      </TableCell>
-                      <TableCell>
-                        <DecisionBadge decision={pkg.decision} />
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <ConfidenceBadge confidence={pkg.overall_confidence} />
+                        <DecisionBadge
+                          decision={
+                            pkg.reviewer_outcome === "ready_for_processing" || pkg.reviewer_outcome === "blocked_or_incomplete"
+                              ? pkg.reviewer_outcome
+                              : pkg.system_recommendation
+                          }
+                          resolved={
+                            pkg.reviewer_outcome === "ready_for_processing" || pkg.reviewer_outcome === "blocked_or_incomplete"
+                          }
+                        />
                       </TableCell>
                     </TableRow>
                   ))}
