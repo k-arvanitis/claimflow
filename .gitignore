@@ -9,6 +9,8 @@ build/
 data/synthetic/
 data/lookups/
 data/real_public/
+data/ocr/
+data/samples/
 data/claimflow.db
 data/claimflow.db.*.bak
 data/uploads/
