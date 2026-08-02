@@ -114,7 +114,7 @@ Scanned pages don't get a black-box "trust the model" treatment:
 
 The operator-facing product interface — App Router, TypeScript, Tailwind, shadcn/ui — lives in [`frontend/`](frontend/). It talks to the FastAPI backend exclusively through its documented, OpenAPI-typed contract (types generated via `openapi-typescript` from a live `/openapi.json` dump — see `frontend/src/lib/api-types.ts`); it never calls doc-intel, the database, or Qdrant directly.
 
-**Routes:** `/dashboard`, `/packages`, `/packages/new`, `/reviews`, `/packages/[packageId]` (the package workspace), `/settings`.
+**Routes:** `/dashboard`, `/packages`, `/packages/new`, `/packages/[packageId]` (the package workspace), `/policies`, `/settings`.
 
 **Package workspace** (`/packages/[packageId]`) is the primary screen: a resizable three-pane layout — document list, original-page viewer with server-rendered bbox evidence highlighting, and a tabbed review panel (Overview / Fields / Validation / Policy evidence / Audit). Selecting a field opens its source document at the right page with the evidence region highlighted; scalar and nested (`service_lines`/`line_items`) fields both support approve/edit/reject, including:
 - Per-field **approve / edit / reject**, with an editable corrected value
@@ -124,6 +124,14 @@ The operator-facing product interface — App Router, TypeScript, Tailwind, shad
 - **Export** — reviewed fields, scalar and nested/list alike (original value, action taken, final value, confidence) download as JSON, ready for downstream handoff
 
 On tablet/mobile the document list moves into a Sheet and the viewer/tabs stack vertically instead of resizing side by side.
+
+**Screenshots:**
+
+| Dashboard | Fields — evidence highlighting | Validation — flagged rules |
+|---|---|---|
+| ![Dashboard](assets/dashboard.png) | ![Fields tab with source evidence highlighted on the original document](assets/fields-evidence.png) | ![Validation tab showing deterministic rule failures with policy-required citations linked](assets/validation.png) |
+
+A demo video walking through a full package end to end will be added here.
 
 **Run it:**
 ```bash
