@@ -1,4 +1,4 @@
-.PHONY: install dev test lint api ui eval docker-up docker-down seed generate clean \
+.PHONY: install dev test lint api frontend eval docker-up docker-down seed generate clean \
 	download-real-public eval-health-public eval-property-public eval-loan-public eval-real-public \
 	db-migrate db-init db-revision
 
@@ -28,7 +28,7 @@ api:
 	uv run uvicorn api.main:app --reload --port 8010
 
 ui:
-	uv run streamlit run streamlit_app.py --server.port 8011
+	cd frontend && npm run dev
 
 eval:
 	uv run python scripts/run_eval.py

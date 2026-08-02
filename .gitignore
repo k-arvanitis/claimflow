@@ -10,9 +10,20 @@ data/synthetic/
 data/lookups/
 data/real_public/
 data/claimflow.db
+data/claimflow.db.*.bak
 data/uploads/
+data/llm_credentials.json
 .superpowers/
 output/
+.pytest_cache/
+.ruff_cache/
+
+# AI-assistant tooling — not part of the shipped app, never pushed
+.claude/
+.agents/
+skills-lock.json
+CLAUDE.md
+AGENTS.md
 
 # Frontend (frontend/)
 frontend/node_modules/
