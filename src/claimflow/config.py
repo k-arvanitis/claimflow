@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     doc_intel_max_tokens: int = Field(
         default=8192, validation_alias="CLAIMFLOW_DOC_INTEL_MAX_TOKENS"
     )
+    doc_intel_paddleocr_vl_server_url: str = Field(
+        default="", validation_alias="CLAIMFLOW_DOC_INTEL_PADDLEOCR_VL_SERVER_URL"
+    )  # empty = doc-intel falls back to its configured OCR_FALLBACK_PROVIDERS (tesseract)
 
     # Qdrant
     qdrant_url: str = "http://localhost:6339"

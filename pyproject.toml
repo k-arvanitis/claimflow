@@ -3,7 +3,7 @@ name = "claimflow"
 version = "0.1.0"
 requires-python = ">=3.13"
 dependencies = [
-    "doc-intel[ocr]",
+    "doc-intel[ocr,paddleocr]",
     "langgraph>=0.2.0",
     "anthropic>=0.105.0",
     "fastapi>=0.115.0",

@@ -16,6 +16,10 @@ os.environ["DOC_INTEL_MODEL"] = settings.doc_intel_model
 os.environ["DOC_INTEL_MAX_TOKENS"] = str(settings.doc_intel_max_tokens)
 if settings.doc_intel_llm_base_url:
     os.environ["DOC_INTEL_LLM_BASE_URL"] = settings.doc_intel_llm_base_url
+if settings.doc_intel_paddleocr_vl_server_url:
+    os.environ["DOC_INTEL_PADDLEOCR_VL_SERVER_URL"] = (
+        settings.doc_intel_paddleocr_vl_server_url
+    )
 if settings.openai_api_key.get_secret_value():
     os.environ["OPENAI_API_KEY"] = settings.openai_api_key.get_secret_value()
 if settings.anthropic_api_key.get_secret_value():
@@ -40,6 +44,10 @@ _doc_intel_config.MODEL = settings.doc_intel_model
 _doc_intel_config.MAX_TOKENS = settings.doc_intel_max_tokens
 if settings.doc_intel_llm_base_url:
     _doc_intel_config.LLM_BASE_URL = settings.doc_intel_llm_base_url
+if settings.doc_intel_paddleocr_vl_server_url:
+    _doc_intel_config.PADDLEOCR_VL_SERVER_URL = (
+        settings.doc_intel_paddleocr_vl_server_url
+    )
 if settings.openai_api_key.get_secret_value():
     _doc_intel_config.OPENAI_API_KEY = settings.openai_api_key.get_secret_value()
 if settings.anthropic_api_key.get_secret_value():
