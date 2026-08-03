@@ -147,14 +147,29 @@ warning-tone text in three places, and Fields/Validation tab layouts that
 required horizontal scrolling. See PROGRESS.md Session N+11 for full detail.
 **Nothing from this is committed to git yet.**
 
-## Per-document extraction for multi-document packages
+## Per-document extraction for multi-document packages — DONE (2026-08-03)
 
-A package only runs ONE extraction (against its primary document type); every other
-document in the package is classified but not deep-extracted — no fields, no
-confidence, no evidence for it. `document-list.tsx`'s "Extracted"/"Classified only"
-badge reflects this honestly (reverted 2026-08-02 after a portfolio demo recording
-that briefly overrode it to say "Extracted" on every document — reverted back
-immediately after recording, not left in the live app).
+Every document in a package with its own registered domain pack now gets its own
+extraction and validation, not just the one matching the package's primary
+domain (`extract_node`/`validate_node` in `src/claimflow/nodes/`, new
+`secondary_extractions` state key — additive, rides in the existing
+`result_json` blob, no DB migration). `document-list.tsx`'s badge now reflects
+this (`extractedDocTypes` — primary + every non-error secondary doc_type).
+Verified live: a real 2-document package (CMS-1500 + EOB) produced independent
+extraction for both, real OpenAI call, EOB validated cleanly against its own
+schema. 266 tests pass (5 new).
+
+**Not covered — cross-document reconciliation.** Each document's extraction is
+validated independently; nothing compares one document's values against
+another's (e.g. does the EOB's `plan_paid`/`patient_responsibility` match the
+CMS-1500's billed amount and diagnosis codes). This is the part of "multi-document
+processing" that's actually differentiating for a buyer — extraction alone is
+"more JSON," reconciliation is what catches real discrepancies. Would need:
+a cross-doc validator keyed on domain pairs (e.g. cms1500+eob), run after both
+extractions complete, producing its own tagged `ValidationFailure` entries.
+Not built. Structured per-document audit trail is also not extended —
+`persist_extraction_result`/`extracted_fields` table stays primary-doc-only;
+secondary results are only in the JSON blob, not individually queryable.
 
 ## EOB multi-claim extraction — column/totals mapping is nondeterministic
 
@@ -202,12 +217,6 @@ generation cleanup both work, confirmed a real retrieval query resolves
 through the alias exactly like a normal collection name (`retrieve.py`
 needed no changes). Regression test added in `test_policy_index.py`
 asserting the build happens before the old collection is ever deleted.
-
-Real fix: run extraction per document (or at least for every document whose
-doc_type has its own registered domain pack — EOB already proved this works
-standalone with the multi-claim fix), not once per package. Until that lands,
-revert `document-list.tsx`'s badge to the real check — search for the
-`ponytail: demo override` comment there.
 
 ## Still open after Session N+11
 

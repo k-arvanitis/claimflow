@@ -58,6 +58,15 @@ export default function PackageWorkspacePage({ params }: { params: Promise<{ pac
 
   const result = pkg.data?.result as PackageResult | null | undefined;
   const fields = useMemo(() => result?.extraction_fields ?? [], [result]);
+  const extractedDocTypes = useMemo(() => {
+    if (pkg.data?.domain == null) return null;
+    return [
+      pkg.data.domain,
+      ...(result?.secondary_extractions ?? [])
+        .filter((s) => s.status !== "error")
+        .map((s) => s.doc_type),
+    ];
+  }, [pkg.data, result]);
   const validationFailures = (review.data?.validation_failures ?? result?.validation_failures ?? []) as ValidationFailure[];
 
   const fieldIds = useMemo(() => {
@@ -113,7 +122,7 @@ export default function PackageWorkspacePage({ params }: { params: Promise<{ pac
       packageId={packageId}
       selectedDocumentId={activeDocumentId}
       onSelect={setSelectedDocumentId}
-      extractedDocType={pkg.data.domain ?? null}
+      extractedDocTypes={extractedDocTypes}
     />
   );
 

@@ -10,15 +10,17 @@ export function DocumentList({
   packageId,
   selectedDocumentId,
   onSelect,
-  extractedDocType,
+  extractedDocTypes,
 }: {
   packageId: string;
   selectedDocumentId: string | null;
   onSelect: (documentId: string) => void;
-  /** The package's domain — only the document matching it gets deep field
-   * extraction today; every other document is classified but not extracted.
-   * Pass null to hide the extracted/classified-only distinction entirely. */
-  extractedDocType?: string | null;
+  /** doc_types that got deep field extraction — the package's primary domain
+   * plus any secondary document with its own registered domain pack (e.g. an
+   * EOB alongside a CMS-1500). Every other document is classified but not
+   * extracted. Pass null/undefined to hide the extracted/classified-only
+   * distinction entirely. */
+  extractedDocTypes?: string[] | null;
 }) {
   const { data: documents, isLoading } = useDocuments(packageId);
 
@@ -53,27 +55,30 @@ export function DocumentList({
 
           <div className="flex flex-wrap items-center gap-1.5 pl-6">
             <Badge variant="secondary">{doc.doc_type}</Badge>
-            {extractedDocType != null && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Badge
-                    variant="outline"
-                    className={
-                      doc.doc_type === extractedDocType
-                        ? "border-success text-success"
-                        : "text-muted-foreground"
-                    }
-                  >
-                    {doc.doc_type === extractedDocType ? "Extracted" : "Classified only"}
-                  </Badge>
-                </TooltipTrigger>
-                <TooltipContent>
-                  {doc.doc_type === extractedDocType
-                    ? "This package's primary document type — fields, confidence, and validation come from here."
-                    : "Recognized and included in this package, but not deep-extracted — only the package's primary document type is."}
-                </TooltipContent>
-              </Tooltip>
-            )}
+            {extractedDocTypes != null &&
+              (() => {
+                const isExtracted = extractedDocTypes.includes(doc.doc_type);
+                const isPrimary = extractedDocTypes[0] === doc.doc_type;
+                return (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Badge
+                        variant="outline"
+                        className={isExtracted ? "border-success text-success" : "text-muted-foreground"}
+                      >
+                        {isExtracted ? "Extracted" : "Classified only"}
+                      </Badge>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {isPrimary
+                        ? "This package's primary document type — fields, confidence, and validation come from here."
+                        : isExtracted
+                          ? "A supporting document with its own extraction and validation — read-only, not cross-checked against the primary document."
+                          : "Recognized and included in this package, but not deep-extracted — no registered schema for this document type."}
+                    </TooltipContent>
+                  </Tooltip>
+                );
+              })()}
             {doc.manually_overridden && <Badge variant="outline">manually overridden</Badge>}
             <Tooltip>
               <TooltipTrigger asChild>
@@ -88,9 +93,9 @@ export function DocumentList({
               <span className="text-xs text-muted-foreground">scan quality {doc.scan_quality.toFixed(2)}</span>
             )}
           </div>
-          {extractedDocType != null && doc.doc_type !== extractedDocType && (
+          {extractedDocTypes != null && !extractedDocTypes.includes(doc.doc_type) && (
             <p className="pl-6 text-xs text-muted-foreground">
-              Recognized, not deep-extracted — only the package&apos;s primary document type is.
+              Recognized, not deep-extracted — no registered schema for this document type.
             </p>
           )}
         </div>
