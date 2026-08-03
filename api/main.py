@@ -451,6 +451,7 @@ def _run_claim(
                     "extraction_overall_confidence"
                 ),
                 "extraction_fields": result.get("extraction_fields", []),
+                "secondary_extractions": result.get("secondary_extractions", []),
                 "validation_failures": result.get("validation_failures", []),
                 "policy_answers": result.get("policy_answers", []),
                 "review_reasons": result.get("review_reasons", []),

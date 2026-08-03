@@ -88,6 +88,8 @@ Every document in a package is classified, not just the primary claim form — a
 
 **Deep extraction** means a document type has its own schema, field-level confidence/evidence, and deterministic validator. **Classification-only** means the document is recognized and routed for manual triage — no structured extraction is attempted.
 
+Every deep-extraction document in a package gets extracted, not just the one matching the package's primary domain. A CMS-1500 claim with an EOB attached gets both extracted and both validated against their own schemas — the EOB's failures (e.g. a missing `patient_name`, `is_bill=True` on what should be informational-only) show up tagged `eob: <field>` alongside the primary form's. **Not done yet:** the two extractions aren't cross-checked against each other (e.g. does the EOB's `plan_paid` match the CMS-1500's billed amount) — each is validated independently, read-only, not merged into the primary claim's editable fields.
+
 | Domain | Deep extraction | Classification-only |
 |--------|-----------------|----------------------|
 | Health | `cms1500`, `eob`, `medicare_summary_notice` | `medical_bill`, `insurance_policy`, `denial_letter`, `clinical_note`, `lab_report`, `discharge_summary`, `referral_letter`, `prior_authorization_letter`, `eligibility_benefits_verification`, `ub04_cms1450`¹ |

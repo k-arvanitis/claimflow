@@ -1174,9 +1174,72 @@ def extract_node(state: ClaimState) -> dict:
     except Exception as exc:
         return {"error": str(exc), "extraction_status": "error"}
 
+    secondary_extractions = _extract_secondary_documents(state, domain_key)
+
     return {
         "extraction_data": result.data,
         "extraction_fields": [f.model_dump() for f in result.fields],
         "extraction_status": result.status,
         "extraction_overall_confidence": result.overall_confidence,
+        "secondary_extractions": secondary_extractions,
     }
+
+
+def _extract_secondary_documents(state: ClaimState, primary_domain_key: str) -> list[dict]:
+    """
+    Extract every other document in the package that has its own registered
+    domain pack (e.g. an EOB alongside the primary CMS-1500 claim form).
+    Sequential, not parallel — these are whole-document extractions, not the
+    page-level work ThreadPoolExecutor is used for elsewhere in this module,
+    and a demo-sized package (a handful of documents) doesn't need it.
+    One failing document is caught and recorded per-entry; it does not fail
+    the run.
+    """
+    results: list[dict] = []
+    for doc in state["documents"]:
+        doc_type = doc["doc_type"]
+        if doc_type == primary_domain_key:
+            continue
+        sub_domain = get_domain(doc_type)
+        if sub_domain is None:
+            continue
+
+        entry: dict = {
+            "doc_type": doc_type,
+            "filename": Path(doc["path"]).name,
+        }
+        try:
+            source = doc["path"]
+            if sub_domain.extract_fn is not None:
+                sub_result = sub_domain.extract_fn(source, sub_domain.spec)
+            else:
+                sub_result = extract(source, sub_domain.spec, classify_doc=True)
+            _null_placeholder_fields(sub_result)
+            if sub_domain.extraction_hook is not None and sub_result.status != "error":
+                if sub_domain.doc_type == "eob":
+                    sub_domain.extraction_hook(
+                        sub_result, load_source(source).full_text
+                    )
+                else:
+                    sub_domain.extraction_hook(sub_result, Path(source))
+            entry.update(
+                {
+                    "data": sub_result.data,
+                    "fields": [f.model_dump() for f in sub_result.fields],
+                    "status": sub_result.status,
+                    "overall_confidence": sub_result.overall_confidence,
+                    "error": None,
+                }
+            )
+        except Exception as exc:
+            entry.update(
+                {
+                    "data": None,
+                    "fields": [],
+                    "status": "error",
+                    "overall_confidence": None,
+                    "error": str(exc),
+                }
+            )
+        results.append(entry)
+    return results

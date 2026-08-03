@@ -22,4 +22,26 @@ def validate_node(state: ClaimState) -> dict:
         }
 
     failures = domain.validate(data)
+    failures.extend(_validate_secondary_extractions(state))
     return {"validation_failures": failures}
+
+
+def _validate_secondary_extractions(state: ClaimState) -> list[ValidationFailure]:
+    """
+    Run each secondary document's own domain validator against its own
+    extracted data, tagging failures with the doc_type so a reviewer can
+    tell which document a failure came from. Skips documents whose
+    extraction failed — nothing to validate.
+    """
+    failures: list[ValidationFailure] = []
+    for extraction in state.get("secondary_extractions") or []:
+        if extraction["status"] == "error":
+            continue
+        sub_domain = get_domain(extraction["doc_type"])
+        if sub_domain is None:
+            continue
+        for failure in sub_domain.validate(extraction["data"] or {}):
+            tagged = dict(failure)
+            tagged["field"] = f"{extraction['doc_type']}: {failure['field']}"
+            failures.append(tagged)
+    return failures

@@ -66,6 +66,16 @@ class ClaimState(TypedDict):
     extraction_status: str | None  # "pass" | "review" | "error"
     extraction_overall_confidence: float | None
 
+    # Extraction from every other document in the package with a registered
+    # domain pack (e.g. an EOB alongside the primary CMS-1500). Read-only in
+    # v1 — not merged into extraction_data, not editable in review, no
+    # cross-document reconciliation against the primary extraction. Each
+    # entry: {doc_type, filename, data, fields, status, overall_confidence,
+    # error}. A per-document extraction failure lands as "error" on that
+    # entry, not on extraction_status — one bad supporting doc doesn't fail
+    # the whole run.
+    secondary_extractions: list[dict] | None
+
     # Validate output
     validation_failures: list[ValidationFailure]
 
