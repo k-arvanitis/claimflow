@@ -1224,3 +1224,72 @@ explicit instruction to clean up now, fix later.
 
 Nothing in this session has been committed to git yet — working tree is
 clean/ready, commit is a separate explicit step.
+
+## Session N+14: portfolio README pass, real multi-document extraction, PaddleOCR-VL fix (DONE — 2026-08-03)
+
+**README standardized** to match the other 3 sibling portfolio repos
+(orion-agent, doc-intel, vault-rag): badges added (was the one repo with
+none), section order/casing aligned, ASCII architecture diagram replacing
+`assets/architecture.svg` (5-node pipeline, same content). Full 3-item
+Contact footer added (was missing entirely).
+
+**Per-document extraction for multi-document packages — built, not just
+reworded.** This closes the TODO item from N+13: previously `extract_node`
+only ran on the single document matching the package's detected domain
+(e.g. the CMS-1500); every other document was classified but never
+deep-extracted, even when it had its own registered domain pack (EOB,
+declarations page, etc. — these already had real schemas/validators,
+just never invoked for non-primary documents).
+
+- `extract_node`/`validate_node` (`src/claimflow/nodes/`) now loop every
+  document with a registered domain pack, not just the primary. New
+  `secondary_extractions` state key, additive — rides in the existing
+  `result_json` blob, no DB migration. Sequential, not parallel (whole-doc
+  work, not the page-level parallelism `ThreadPoolExecutor` is used for
+  elsewhere). One failing secondary doc is caught per-entry, doesn't fail
+  the run. Validation failures tagged `doc_type: field` so a reviewer
+  knows which document a failure came from.
+- **Verified live, twice.** First with `doc_type_overrides` forcing
+  classification (isolating the new logic from an unrelated OCR issue —
+  see below); then again for real after fixing PaddleOCR-VL. Both times:
+  real OpenAI call, real EOB extraction (`payer_name`, `patient_name`,
+  `is_bill`, `claims`), validated cleanly against its own schema,
+  primary CMS-1500 extraction/validation unaffected.
+- **Frontend updated to match**: `document-list.tsx`'s "Extracted"/
+  "Classified only" badge now reflects every extracted doc_type (primary +
+  secondary), not just the primary domain — was about to become a real
+  UI/backend inconsistency otherwise. `SecondaryExtraction` type added to
+  `package-result.ts` (backend `result` is an untyped dict, no OpenAPI
+  schema change needed). 37/37 frontend tests, tsc clean, build clean.
+- **Not covered — cross-document reconciliation.** Each document validates
+  independently; nothing compares one document's values against another's
+  (EOB `plan_paid` vs CMS-1500 billed amount, for instance). This is the
+  actually-differentiating part of "multi-document processing" for a
+  buyer — extraction alone is more JSON, reconciliation catches real
+  discrepancies. Documented as the explicit remaining gap in TODO.md, not
+  implied as covered.
+
+**PaddleOCR-VL fixed — real root cause, not flaky infra.** While verifying
+the above, a CMS-1500 sample image failed classification (fell to
+tesseract, not accurate enough). Root cause: `pyproject.toml` requested
+doc-intel's `[ocr]` extra (`unstructured[pdf]`, unrelated) instead of
+`[paddleocr]` (the `paddleocr`/`paddlepaddle`/`paddlex` client package
+actually needed — required even when VL-recognition is offloaded to a
+remote GPU server, since local layout-detection still runs through it).
+This means PaddleOCR-VL had never actually worked on any machine that ran
+this repo since the extra was declared, not just this session's box.
+Fixed: `doc-intel[ocr,paddleocr]`, new `CLAIMFLOW_DOC_INTEL_PADDLEOCR_VL_SERVER_URL`
+setting wired through the same passthrough pattern as the other
+`DOC_INTEL_*` settings, GPU container brought up
+(`doc-intel`'s `make paddleocr-vllm-up`, ~2.4GB, checked against the
+shared A40 first, stopped again after verification — it reserves ~22GB
+via vLLM's utilization ceiling regardless of the model being small).
+Verified live: the previously-failing CMS-1500 sample now classifies
+correctly with zero manual override.
+
+**Verification, real:** 266 backend tests pass (261 existing + 5 new for
+multi-doc extraction), 37 frontend tests, `ruff check`/`tsc --noEmit`/
+`npm run build` all clean. Landed as 4 commits on `main` (merged from
+short-lived feature branches, not squashed): README standardization,
+multi-document extraction, frontend UI + TODO update, PaddleOCR-VL fix.
+All pushed.

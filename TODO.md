@@ -171,6 +171,27 @@ Not built. Structured per-document audit trail is also not extended —
 `persist_extraction_result`/`extracted_fields` table stays primary-doc-only;
 secondary results are only in the JSON blob, not individually queryable.
 
+## PaddleOCR-VL never actually worked — FIXED (2026-08-03)
+
+Root cause, not flaky infra: `pyproject.toml` requested doc-intel's `[ocr]`
+extra (`unstructured[pdf]`, unrelated to PaddleOCR-VL) instead of
+`[paddleocr]` (the actual `paddleocr`/`paddlepaddle`/`paddlex` client
+package). This means every image-classification/extraction call silently
+fell to the tesseract fallback on every machine that ever ran this repo,
+not just this session's box — "PaddleOCR-VL backend is selected but the
+PaddleOCR-VL package is not available" was always the real error, just
+never diagnosed as a wrong-extra bug before.
+
+Fixed: `doc-intel[ocr,paddleocr]`, new
+`CLAIMFLOW_DOC_INTEL_PADDLEOCR_VL_SERVER_URL` setting wired through the
+same passthrough pattern as the other `DOC_INTEL_*` config in
+`nodes/extract.py`. Verified live: a CMS-1500 sample image that previously
+failed classification now classifies correctly with zero manual override.
+The GPU-served container (doc-intel's `make paddleocr-vllm-up`) is not
+running by default — bring it up before relying on PaddleOCR-VL locally;
+it reserves ~22GB via vLLM's utilization ceiling regardless of the model
+being small, so don't leave it running unattended on a shared GPU.
+
 ## EOB multi-claim extraction — column/totals mapping is nondeterministic
 
 The claims-list schema change (2026-08-02) fixed claim-boundary detection — the
